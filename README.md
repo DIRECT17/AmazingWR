@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/images/readme-banner.svg" alt="AmazingWR — помощник для Amazing RP" width="100%">
+</p>
+
 <div align="center">
 
 # AmazingWR
@@ -9,6 +13,25 @@
 [Скачать последнюю версию](https://github.com/DIRECT17/AmazingWR/releases/latest)
 
 </div>
+
+## Как это выглядит
+
+<table>
+  <tr>
+    <th align="center">Главный экран</th>
+    <th align="center">История уведомлений</th>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/overview.png" alt="Обзор AmazingWR с состоянием клиента и мини-игрой" width="100%"></td>
+    <td><img src="docs/screenshots/history.png" alt="История уведомлений о событиях и сообщениях" width="100%"></td>
+  </tr>
+</table>
+
+### Уведомления в Telegram
+
+Бот присылает краткие сведения о сделках в павильоне и входящих сообщениях.
+
+<p align="center"><img src="docs/screenshots/telegram-bot.png" alt="Пример уведомлений AmazingWR в Telegram" width="520"></p>
 
 ## Что умеет AmazingWR
 
