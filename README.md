@@ -1,25 +1,47 @@
-# AmzWR
+<div align="center">
 
-AmzWR — Windows companion client for Amazing RP. It watches the selected `chatlog.txt` and displays concise notifications, event history, and a shared phone book. The dashboard also includes a small “Catch the cat” game.
+# AmazingWR
 
-## Download
+### Уведомления о торговле и входящих контактах в Amazing RP
 
-Download the latest `AmazingWR.exe` from the [Releases](../../releases) page. The application targets Windows x64 and is published as a self-contained executable.
+Компактный помощник для игроков, которые занимаются перепродажей и следят за сделками в павильоне.
 
-## Build from source
+[Скачать последнюю версию](https://github.com/DIRECT17/AmazingWR/releases/latest)
 
-Requirements: Windows, PowerShell, and the .NET 10 SDK.
+</div>
+
+## Что умеет AmazingWR
+
+- **Сообщает о сделках в павильоне:** уведомляет о покупке и продаже, показывает предмет, количество, цену и имя игрока.
+- **Следит за телефоном:** выводит уведомления о входящих SMS и звонках с именем и номером собеседника.
+- **Собирает телефонную книгу:** сохраняет имена и номера из входящих SMS и объявлений в игровом чате.
+- **Разделяет контакты по серверам:** номер хранится в телефонной книге своего сервера, поэтому контакты с разных серверов не смешиваются.
+
+Уведомления появляются в приложении, а история событий и телефонная книга доступны в клиенте.
+
+## Как начать
+
+1. Откройте Telegram-бота [@AmazingWR_bot](https://t.me/AmazingWR_bot) и запустите его.
+2. Скопируйте свой **Telegram ID**, который покажет бот.
+3. Запустите клиент AmazingWR и вставьте этот ID в окно входа.
+4. Укажите путь к `chatlog.txt` игры и включите нужные уведомления.
+
+Используйте один и тот же Telegram ID в боте и клиенте — так приложение подключится к вашему аккаунту и сможет показывать ваши события.
+
+## Телефонная книга
+
+Книга общая для игроков и ведётся отдельно для каждого сервера Amazing RP. В неё попадают номера из входящих SMS и объявлений в чате. Имя игрока, номер и время последнего изменения отображаются в списке; контакты можно искать по имени или номеру.
+
+## Скачать
+
+Актуальный установочный файл **AmazingWR.exe** находится на странице [последнего релиза](https://github.com/DIRECT17/AmazingWR/releases/latest). В разделе [всех релизов](https://github.com/DIRECT17/AmazingWR/releases) можно посмотреть предыдущие версии.
+
+## Сборка из исходников
+
+Клиент предназначен для Windows x64. Для самостоятельной сборки установите [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0), откройте PowerShell в папке проекта и запустите:
 
 ```powershell
 ./scripts/build-app.ps1
 ```
 
-The build output is created under `dist/`.
-
-## Privacy
-
-The client reads the game log path selected by the user. For sign-in, licensing, and usage metrics, it communicates with the AmzWR service; the in-app terms explain which account and device information is sent. Do not put credentials or private service configuration in this repository.
-
-## Release contents
-
-The public repository contains the Windows client source and its build assets. The Telegram bot, server database, deployment configuration, and credentials are not part of this repository.
+Готовый файл появится в папке `dist/`.
