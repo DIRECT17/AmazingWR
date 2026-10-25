@@ -24,11 +24,7 @@
     <path d="M0 30H1200M0 80H1200M0 130H1200M0 180H1200"/>
   </g>
   <rect x="42" y="42" width="176" height="176" rx="31" fill="#eef0f2"/>
-  <g transform="translate(5 0) scale(.56 1)">
-    <path d="M69 158h23v-17h16v-23h16V99h17V79h20v29h22v15h22v-15h16V79h20v20h17v19h16v23h17v31h-16v16h-24v14h-46v-8h-28v-9h-31v-8h-28v-6h-22v17H69z" fill="#11151b"/>
-    <rect x="225" y="140" width="17" height="5" rx="1" fill="#eef0f2"/>
-    <rect x="280" y="140" width="17" height="5" rx="1" fill="#eef0f2"/>
-  </g>
+  <g transform="translate(65 90) scale(5)" fill="#11151b"><path d="M15 0h1v1h-1zM23 0h1v1h-1zM14 1h3v1h-3zM22 1h3v1h-3zM13 2h2v1h-2zM16 2h1v1h-1zM21 2h2v1h-2zM24 2h1v1h-1zM12 3h2v1h-2zM16 3h2v1h-2zM20 3h2v1h-2zM24 3h1v1h-1zM11 4h2v1h-2zM15 4h8v1h-8zM24 4h1v1h-1zM9 5h16v1h-16zM8 6h17v1h-17zM7 7h18v1h-18zM7 8h18v1h-18zM7 9h19v1h-19zM1 10h5v1h-5zM7 10h19v1h-19zM0 11h14v1h-14zM17 11h4v1h-4zM24 11h2v1h-2zM0 12h26v1h-26zM0 13h3v1h-3zM6 13h20v1h-20zM9 14h16v1h-16zM11 15h13v1h-13z"/></g>
   <text x="264" y="84" fill="#aeb8c3" font-family="Segoe UI,Arial,sans-serif" font-size="15" font-weight="600" letter-spacing="3">ПОМОЩНИК ДЛЯ AMAZING RP</text>
   <text x="260" y="159" fill="#f6f7f8" font-family="Segoe UI,Arial,sans-serif" font-size="70" font-weight="700" letter-spacing="-2">AmazingWR</text>
   <rect x="264" y="183" width="70" height="4" rx="2" fill="url(#accent)"/>

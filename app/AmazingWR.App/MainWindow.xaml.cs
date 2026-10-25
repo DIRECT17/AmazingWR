@@ -1,8 +1,9 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -27,13 +28,11 @@ public partial class MainWindow : Window
     private static readonly string DefaultLog = @"C:\Games\Amazing Games\Amazing Online\PC\amazing\chatlog.txt";
     private readonly ClientSettings _settings;
     private readonly ObservableCollection<HistoryEntry> _historyItems = [];
-    private readonly ObservableCollection<HistoryEntry> _visibleHistoryItems = [];
-    private readonly ObservableCollection<PhonebookEntry> _phonebookItems = [];
-    private readonly ObservableCollection<PhonebookEntry> _visiblePhonebookItems = [];
+
+    private readonly List<PhonebookEntry> _phonebookItems = [];
+
     private string _historyFilter = "Все";
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(3) };
-    private readonly DispatcherTimer _miniGameTimer = new() { Interval = TimeSpan.FromSeconds(1) };
-    private readonly Random _miniGameRandom = new();
     private long _fileOffset;
     private readonly StringBuilder _partialLine = new();
     private bool _monitoring;
@@ -46,10 +45,11 @@ public partial class MainWindow : Window
     private DateTime _lastUsageReport = DateTime.MinValue;
     private string? _publicIp;
     private string? _latestDownloadUrl;
+    private string? _latestSha256;
+    private bool _updating;
     private Forms.NotifyIcon? _trayIcon;
     private bool _exitRequested;
-    private int _miniGameScore;
-    private int _miniGameSeconds;
+    private string _statsPeriod = "day";
 
     public MainWindow()
     {
@@ -61,12 +61,15 @@ public partial class MainWindow : Window
         SaveSettings();
         _loading = true;
         TelegramIdBox.Text = _settings.UserId;
+        ApplyToken(Secrets.Unprotect(_settings.Token));
+        SavePasswordToggle.IsChecked = _settings.SavePassword;
+        if (_settings.SavePassword) PasswordBox.Password = Secrets.Unprotect(_settings.SavedPassword);
         ActivationAutoLoginToggle.IsChecked = _settings.AutoLogin;
         SettingsAutoLoginToggle.IsChecked = _settings.AutoLogin;
         SettingsLogPath.Text = _settings.LogPath;
-        ApplyBackgroundImage();
-        HistoryList.ItemsSource = _visibleHistoryItems;
-        PhonebookList.ItemsSource = _visiblePhonebookItems;
+
+
+
         SmsToggle.IsChecked = _settings.Sms;
         CallsToggle.IsChecked = _settings.Calls;
         BoothBuyToggle.IsChecked = _settings.BoothBuy;
@@ -76,17 +79,14 @@ public partial class MainWindow : Window
         ThirstToggle.IsChecked = _settings.Thirst;
         BathToggle.IsChecked = _settings.Bath;
         NeedToggle.IsChecked = _settings.Need;
-        ThemeToggle.IsChecked = _settings.DarkTheme;
         LanguageBox.SelectedIndex = _settings.Language == "en" ? 1 : 0;
         BoothDropTimeBox.Text = _settings.BoothDropTime;
         MonitoringToggle.IsChecked = _settings.Monitoring;
         ShowNotificationsTabToggle.IsChecked = _settings.ShowNotificationsTab;
         ApplyTabVisibility();
-        ApplyTheme();
         ApplyLanguage();
         _loading = false;
         _timer.Tick += Timer_Tick;
-        _miniGameTimer.Tick += MiniGameTimer_Tick;
         Loaded += MainWindow_Loaded;
         _ = ReportClientTelemetryAsync("launch", _settings.UserId);
         Closing += MainWindow_Closing;
@@ -96,7 +96,6 @@ public partial class MainWindow : Window
     private void MainWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
         if (_exitRequested) return;
-        _miniGameTimer.Stop();
         e.Cancel = true;
         Hide();
         ShowInTaskbar = false;
@@ -146,13 +145,30 @@ public partial class MainWindow : Window
 
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
+        Updater.Cleanup();
         if (!_settings.AutoLogin || string.IsNullOrWhiteSpace(_settings.UserId)) return;
         try
         {
-            var profile = await GetProfileAsync(_settings.UserId, _settings.MachineId);
+            var profile = await GetProfileWithSavedLoginAsync();
             if (profile.ExpiresAt > DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()) EnterApp(profile);
         }
-        catch { /* Keep the activation screen visible until the local bot is online. */ }
+        catch (Exception ex)
+        {
+            // Stay on the sign-in screen; show why when the server told us (e.g. the password changed).
+            Log.Write("Automatic sign-in failed", ex);
+            if (ex is ApiException) ActivationMessage.Text = ex.Message;
+        }
+    }
+
+    /// <summary>Profile request with the stored session; if the session is gone, signs in again with the saved password.</summary>
+    private async Task<TelegramProfile> GetProfileWithSavedLoginAsync()
+    {
+        try { return await GetProfileAsync(_settings.UserId, _settings.MachineId); }
+        catch (ApiException ex) when (ex.Status == 401 && _settings.SavePassword && Secrets.Unprotect(_settings.SavedPassword) is { Length: > 0 } saved)
+        {
+            await LoginAsync(_settings.UserId, saved);
+            return await GetProfileAsync(_settings.UserId, _settings.MachineId);
+        }
     }
 
     private async Task ReportClientTelemetryAsync(string eventType, string userId)
@@ -162,7 +178,7 @@ public partial class MainWindow : Window
             if (_publicIp is null)
             {
                 try { _publicIp = (await PublicIpApi.GetStringAsync("https://api.ipify.org")).Trim(); }
-                catch { _publicIp = ""; }
+                catch (Exception ex) { Log.Write("Could not detect the public IP", ex); _publicIp = ""; }
             }
             using var response = await Api.PostAsJsonAsync("telemetry", new
             {
@@ -174,64 +190,83 @@ public partial class MainWindow : Window
                 operatingSystem = RuntimeInformation.OSDescription,
                 publicIp = _publicIp
             });
-            if (!response.IsSuccessStatusCode) Debug.WriteLine($"Telemetry was rejected: {(int)response.StatusCode}");
+            if (!response.IsSuccessStatusCode) Log.Write($"Telemetry was rejected: {(int)response.StatusCode}");
         }
-        catch (Exception ex) { Debug.WriteLine($"Could not report app telemetry: {ex.Message}"); }
+        catch (Exception ex) { Log.Write($"Could not report app telemetry: {ex.Message}"); }
     }
 
     private void GetAccess_Click(object sender, RoutedEventArgs e) => OpenTelegram("https://t.me/AmazingWR_bot");
     private void Support_Click(object sender, RoutedEventArgs e) => OpenTelegram("https://t.me/AmzWR_support");
+    private void GitHub_Click(object sender, RoutedEventArgs e) => OpenTelegram("https://github.com/DIRECT17/AmazingWR");
 
     private void Terms_Click(object sender, RoutedEventArgs e)
     {
-        var russian = "AmzWR считывает выбранный файл chatlog.txt для показа игровых уведомлений.\n\nДля учёта запусков и лицензии приложение передаёт локальному боту Telegram ID, если он введён, игровой ник из настроек лаунчера, версию Windows, внешний IP, события запуска и попыток входа, а также примерное время использования. Эти данные видны администратору и сохраняются в базе бота на компьютере, где он запущен.\n\nВнешний IP определяется сервисом api.ipify.org. Не используйте приложение, если не согласны с этой обработкой данных. Поддержка: @AmzWR_support.";
-        var english = "AmzWR reads the selected chatlog.txt file to display game alerts.\n\nFor launch metrics and licensing, the app sends the local Telegram bot your Telegram ID if entered, the game nickname from launcher settings, Windows version, public IP, launch and sign-in attempt events, and approximate usage time. The administrator can view this data; it is stored in the bot database on the computer running the bot.\n\nThe public IP is determined through api.ipify.org. Do not use the app if you do not agree with this data processing. Support: @AmzWR_support.";
-        new TermsWindow(T(russian, english), _settings.Language == "en", _settings.DarkTheme) { Owner = this }.ShowDialog();
+        var russian = "## Что делает приложение\n\nAmazingWR читает выбранный вами файл chatlog.txt и показывает уведомления о нуждах персонажа, сделках в павильоне, SMS и звонках. Приложение не вмешивается в игру и не изменяет её файлы.\n\n## Какие данные передаются на сервер\n\n• Telegram ID, хеш пароля и привязка к вашему компьютеру;\n• игровой ник и сервер из настроек лаунчера, версия Windows и внешний IP (определяется через api.ipify.org);\n• события запуска и попыток входа, примерное время использования;\n• история событий (нужды, павильон, телефон) и тексты уведомлений, которые приходят вам в Telegram;\n• имена и номера из входящих SMS и объявлений: они попадают в общую телефонную книгу вашего игрового сервера, которую видят все пользователи приложения.\n\n## Кто видит данные\n\nДанные хранятся на сервере проекта и доступны администратору. Пароль хранится на сервере только в виде хеша, а на вашем компьютере в зашифрованном виде средствами Windows.\n\n## Ваши права\n\nЧтобы удалить данные или сбросить привязку компьютера, напишите в поддержку: @AmzWR_support. Если вы не согласны с такой обработкой данных, не используйте приложение.";
+        var english = "## What the app does\n\nAmazingWR reads the chatlog.txt file you select and shows alerts about your character's needs, booth trades, SMS and calls. It does not interfere with the game and does not modify its files.\n\n## What is sent to the server\n\n• Your Telegram ID, a hash of your password and the link to your computer;\n• the game nickname and server from the launcher settings, the Windows version and your public IP (detected through api.ipify.org);\n• launch and sign-in events and approximate usage time;\n• the event history (needs, booth, phone) and the alert texts delivered to you in Telegram;\n• names and numbers from incoming SMS and announcements: they go into the shared phonebook of your game server, which every user of the app can see.\n\n## Who can see the data\n\nThe data is stored on the project's server and is available to the administrator. Your password is stored on the server only as a hash, and on your computer in encrypted form using Windows protection.\n\n## Your rights\n\nTo delete your data or reset the computer link, write to support: @AmzWR_support. If you do not agree with this processing, do not use the app.";
+        new TermsWindow(T(russian, english), _settings.Language == "en") { Owner = this }.ShowDialog();
     }
 
     private static void OpenTelegram(string url)
     {
         try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }
-        catch (Exception ex) { Debug.WriteLine($"Could not open Telegram link: {ex.Message}"); }
+        catch (Exception ex) { Log.Write($"Could not open Telegram link: {ex.Message}"); }
     }
 
     private async void Connect_Click(object sender, RoutedEventArgs e)
     {
         ConnectButton.IsEnabled = false;
         ActivationMessage.Foreground = System.Windows.Media.Brushes.LightSalmon;
-        ActivationMessage.Text = T("Подключаемся к боту…", "Connecting to the bot…");
+        ActivationMessage.Text = T("Входим…", "Signing in…");
         try
         {
             var id = TelegramIdBox.Text.Trim();
-            if (!Regex.IsMatch(id, @"^\d{5,15}$")) throw new InvalidOperationException("Введите числовой Telegram ID.");
+            var password = PasswordBox.Password;
+            if (!Regex.IsMatch(id, @"^\d{5,15}$")) throw new InvalidOperationException(T("Введите числовой Telegram ID.", "Enter your numeric Telegram ID."));
+            if (password.Length == 0) throw new InvalidOperationException(T("Введите пароль. Задать его можно в Telegram-боте.", "Enter your password. You can set it in the Telegram bot."));
             _ = ReportClientTelemetryAsync("attempt", id);
             _settings.UserId = id;
             _settings.AutoLogin = ActivationAutoLoginToggle.IsChecked == true;
             SettingsAutoLoginToggle.IsChecked = _settings.AutoLogin;
+            await LoginAsync(id, password);
+            _settings.SavePassword = SavePasswordToggle.IsChecked == true;
+            _settings.SavedPassword = _settings.SavePassword ? Secrets.Protect(password) : "";
             SaveSettings();
-            using var connectResponse = await Api.PostAsJsonAsync("connect", new { id, machineId = _settings.MachineId });
-            if (!connectResponse.IsSuccessStatusCode) throw new InvalidOperationException(await ErrorText(connectResponse));
-            var connectResult = await connectResponse.Content.ReadFromJsonAsync<ConnectResult>();
-            if (connectResult?.Pending == true)
-            {
-                ActivationMessage.Text = T("Бот отправил подтверждение в Telegram. Подтвердите вход там, затем нажмите эту кнопку ещё раз.", "The bot sent a Telegram confirmation. Approve it there, then click this button again.");
-                ActivationMessage.Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(105, 221, 176));
-                ConnectButton.Content = "Проверить подключение";
-                return;
-            }
             var profile = await GetProfileAsync(id, _settings.MachineId);
             if (profile.ExpiresAt <= DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())
-                throw new InvalidOperationException(profile.TrialUsed ? "Подключение подтверждено, но подписка не активна. Оформите её через Telegram-бота." : "Подключение подтверждено. Нажмите /start в Telegram-боте, чтобы включить пробный доступ.");
+                throw new InvalidOperationException(profile.TrialUsed
+                    ? T("Вход выполнен, но подписка не активна. Оформите её через Telegram-бота.", "Signed in, but the subscription is not active. Get one through the Telegram bot.")
+                    : T("Вход выполнен. Нажмите /start в Telegram-боте, чтобы включить пробный доступ.", "Signed in. Send /start to the Telegram bot to activate the trial."));
             EnterApp(profile);
         }
-        catch (Exception ex) { ActivationMessage.Text = ex.Message; }
+        catch (Exception ex) { Log.Write("Sign-in failed", ex); ActivationMessage.Text = ex.Message; }
         finally { ConnectButton.IsEnabled = true; }
     }
+
+    private void LoginKey_Down(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key != System.Windows.Input.Key.Enter || !ConnectButton.IsEnabled) return;
+        e.Handled = true;
+        Connect_Click(ConnectButton, new RoutedEventArgs());
+    }
+
+    private async Task LoginAsync(string id, string password)
+    {
+        using var response = await Api.PostAsJsonAsync("login", new { id, machineId = _settings.MachineId, password });
+        if (!response.IsSuccessStatusCode) throw new ApiException((int)response.StatusCode, await ErrorText(response));
+        var result = await response.Content.ReadFromJsonAsync<LoginResult>();
+        if (string.IsNullOrEmpty(result?.Token)) throw new InvalidOperationException(T("Сервер не выдал сессию. Попробуйте ещё раз.", "The server did not issue a session. Try again."));
+        _settings.Token = Secrets.Protect(result.Token);
+        ApplyToken(result.Token);
+        SaveSettings();
+    }
+
+    private static void ApplyToken(string token) =>
+        Api.DefaultRequestHeaders.Authorization = string.IsNullOrEmpty(token) ? null : new AuthenticationHeaderValue("Bearer", token);
 
     private async Task<TelegramProfile> GetProfileAsync(string id, string machineId)
     {
         using var response = await Api.GetAsync($"profile?id={Uri.EscapeDataString(id)}&machineId={Uri.EscapeDataString(machineId)}");
-        if (!response.IsSuccessStatusCode) throw new InvalidOperationException(await ErrorText(response));
+        if (!response.IsSuccessStatusCode) throw new ApiException((int)response.StatusCode, await ErrorText(response));
         return (await response.Content.ReadFromJsonAsync<TelegramProfile>()) ?? throw new InvalidOperationException("Бот вернул некорректный ответ.");
     }
 
@@ -242,9 +277,11 @@ public partial class MainWindow : Window
             var error = await response.Content.ReadFromJsonAsync<ApiError>();
             if (!string.IsNullOrWhiteSpace(error?.Error)) return error.Error;
         }
-        catch { }
+        catch (Exception ex) { Log.Write("Could not read the server error body", ex); }
         return $"Локальный бот вернул ошибку ({(int)response.StatusCode}). Убедитесь, что он запущен.";
     }
+
+    private sealed class ApiException(int status, string message) : InvalidOperationException(message) { public int Status { get; } = status; }
 
     private void EnterApp(TelegramProfile profile)
     {
@@ -285,7 +322,7 @@ public partial class MainWindow : Window
         {
             ResizeMode = ResizeMode.NoResize;
             MinWidth = 500; MinHeight = 600;
-            Width = 520; Height = 620;
+            Width = 920; Height = 680;
         }
         var work = SystemParameters.WorkArea;
         Left = work.Left + Math.Max(0, (work.Width - Width) / 2);
@@ -312,7 +349,7 @@ public partial class MainWindow : Window
                     return nickname.Trim();
             }
         }
-        catch (Exception ex) { Debug.WriteLine($"Could not read game nickname: {ex.Message}"); }
+        catch (Exception ex) { Log.Write($"Could not read game nickname: {ex.Message}"); }
         return null;
     }
 
@@ -324,7 +361,7 @@ public partial class MainWindow : Window
             var value = Convert.ToString(key?.GetValue("SelectedServer"), CultureInfo.InvariantCulture)?.Trim();
             return int.TryParse(value, out var server) && server > 0 ? server.ToString(CultureInfo.InvariantCulture) : null;
         }
-        catch (Exception ex) { Debug.WriteLine($"Could not read selected game server: {ex.Message}"); return null; }
+        catch (Exception ex) { Log.Write($"Could not read selected game server: {ex.Message}"); return null; }
     }
 
     private async Task LoadAvatarAsync(string id)
@@ -337,7 +374,7 @@ public partial class MainWindow : Window
             var image = new BitmapImage(); image.BeginInit(); image.CacheOption = BitmapCacheOption.OnLoad; image.StreamSource = stream; image.EndInit(); image.Freeze();
             ProfileAvatar.Source = image;
         }
-        catch { }
+        catch (Exception ex) { Log.Write("Could not load the avatar", ex); }
     }
 
     private async Task RefreshAppVersionAsync()
@@ -352,6 +389,7 @@ public partial class MainWindow : Window
             var latest = (response?.Version ?? "").Trim().TrimStart('v', 'V');
             if (latest.Length == 0) throw new InvalidDataException("The server returned no version.");
             _latestDownloadUrl = response?.DownloadUrl;
+            _latestSha256 = response?.Sha256;
             var hasInstalledVersion = Version.TryParse(local, out var installedVersion);
             var hasServerVersion = Version.TryParse(latest, out var serverVersion);
             var canCompare = hasInstalledVersion && hasServerVersion;
@@ -363,59 +401,36 @@ public partial class MainWindow : Window
                 ? Visibility.Visible
                 : Visibility.Collapsed;
         }
-        catch
+        catch (Exception ex)
         {
+            Log.Write("Could not check for a new version", ex);
             VersionLabel.Text = T($"Версия v{local} · сервер недоступен", $"Version v{local} · server unavailable");
         }
     }
 
-    private void UpdateApp_Click(object sender, RoutedEventArgs e)
+    private async void UpdateApp_Click(object sender, RoutedEventArgs e)
     {
-        if (!Uri.TryCreate(_latestDownloadUrl, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps) return;
-        try { Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true }); }
-        catch (Exception ex) { Debug.WriteLine($"Could not open app update download: {ex.Message}"); }
-    }
-
-    private void MiniGameStart_Click(object sender, RoutedEventArgs e)
-    {
-        _miniGameTimer.Stop();
-        _miniGameScore = 0;
-        _miniGameSeconds = 20;
-        MiniGameScoreLabel.Text = "0";
-        MiniGameTimeLabel.Text = _miniGameSeconds.ToString(CultureInfo.InvariantCulture);
-        MiniGameStatusLabel.Text = T("Лови кота, пока идёт время!", "Catch the cat before time runs out!");
-        MiniGameStartButton.Content = T("Начать заново", "Restart");
-        MiniGameTarget.Visibility = Visibility.Visible;
-        MoveMiniGameTarget();
-        _miniGameTimer.Start();
-    }
-
-    private void MiniGameTarget_Click(object sender, RoutedEventArgs e)
-    {
-        if (!_miniGameTimer.IsEnabled) return;
-        _miniGameScore++;
-        MiniGameScoreLabel.Text = _miniGameScore.ToString(CultureInfo.InvariantCulture);
-        MoveMiniGameTarget();
-    }
-
-    private void MiniGameTimer_Tick(object? sender, EventArgs e)
-    {
-        _miniGameSeconds--;
-        MiniGameTimeLabel.Text = _miniGameSeconds.ToString(CultureInfo.InvariantCulture);
-        if (_miniGameSeconds > 0) return;
-
-        _miniGameTimer.Stop();
-        MiniGameTarget.Visibility = Visibility.Collapsed;
-        MiniGameStartButton.Content = T("Ещё раунд", "Play again");
-        MiniGameStatusLabel.Text = T($"Раунд завершён · ваш счёт: {_miniGameScore}", $"Round over · your score: {_miniGameScore}");
-    }
-
-    private void MoveMiniGameTarget()
-    {
-        var canvasWidth = MiniGameCanvas.ActualWidth > MiniGameTarget.Width ? MiniGameCanvas.ActualWidth : 220;
-        var canvasHeight = MiniGameCanvas.ActualHeight > MiniGameTarget.Height ? MiniGameCanvas.ActualHeight : 82;
-        Canvas.SetLeft(MiniGameTarget, _miniGameRandom.Next(Math.Max(1, (int)(canvasWidth - MiniGameTarget.Width))));
-        Canvas.SetTop(MiniGameTarget, _miniGameRandom.Next(Math.Max(1, (int)(canvasHeight - MiniGameTarget.Height))));
+        if (_updating || !Uri.TryCreate(_latestDownloadUrl, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps) return;
+        _updating = true;
+        UpdateButton.IsEnabled = false;
+        try
+        {
+            var progress = new Progress<double>(share => UpdateButton.Content = T($"Загрузка {share:P0}", $"Downloading {share:P0}"));
+            var newExe = await Updater.DownloadAsync(uri.AbsoluteUri, _latestSha256, progress);
+            UpdateButton.Content = T("Устанавливаю…", "Installing…");
+            Updater.StartApply(newExe);
+            ExitFromTray();
+        }
+        catch (Exception ex)
+        {
+            // Not writable folder, antivirus, no network…: fall back to a normal browser download.
+            Log.Write("Automatic update failed; opening the download page instead", ex);
+            UpdateButton.Content = T("✨ Обновить AmzWR", "✨ Update AmzWR");
+            UpdateButton.IsEnabled = true;
+            _updating = false;
+            try { Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true }); }
+            catch (Exception openError) { Log.Write("Could not open app update download", openError); }
+        }
     }
 
     private void Timer_Tick(object? sender, EventArgs e)
@@ -455,8 +470,9 @@ public partial class MainWindow : Window
             var connected = health?.Ok == true && health.TelegramOk;
             SetBridgeStatus(connected);
         }
-        catch
+        catch (Exception ex)
         {
+            Log.Write("Server health check failed", ex);
             SetBridgeStatus(false);
         }
     }
@@ -473,11 +489,16 @@ public partial class MainWindow : Window
     {
         try
         {
-            var profile = await GetProfileAsync(_settings.UserId, _settings.MachineId);
+            var profile = await GetProfileWithSavedLoginAsync();
             _expiresAt = profile.ExpiresAt;
             UpdateSubscription();
         }
-        catch { Debug.WriteLine("Could not refresh Telegram profile; local bridge health is checked separately."); }
+        catch (ApiException ex) when (ex.Status == 401)
+        {
+            Log.Write("Session is no longer valid", ex);
+            SignOut(T("Сессия завершена: пароль был изменён. Войдите снова.", "Session ended: the password was changed. Please sign in again."));
+        }
+        catch (Exception ex) { Log.Write("Could not refresh the profile; server health is checked separately", ex); }
     }
 
     private void UpdateSubscription()
@@ -530,7 +551,7 @@ public partial class MainWindow : Window
     {
         _partialLine.Clear();
         try { _fileOffset = new FileInfo(_settings.LogPath).Length; }
-        catch { _fileOffset = 0; }
+        catch (Exception ex) { Log.Write("Could not read the chatlog size", ex); _fileOffset = 0; }
     }
 
     private void ReadNewLines()
@@ -556,7 +577,7 @@ public partial class MainWindow : Window
                 ProcessLine(line);
             }
         }
-        catch (Exception ex) { Debug.WriteLine($"Could not read chatlog.txt: {ex}"); }
+        catch (Exception ex) { Log.Write($"Could not read chatlog.txt: {ex}"); }
     }
 
     private void ProcessLine(string line)
@@ -685,9 +706,9 @@ public partial class MainWindow : Window
                 category,
                 text
             });
-            if (!response.IsSuccessStatusCode) Debug.WriteLine($"Server did not save history: {(int)response.StatusCode}");
+            if (!response.IsSuccessStatusCode) Log.Write($"Server did not save history: {(int)response.StatusCode}");
         }
-        catch (Exception ex) { Debug.WriteLine($"Could not save history to server: {ex.Message}"); }
+        catch (Exception ex) { Log.Write($"Could not save history to server: {ex.Message}"); }
     }
 
     private async Task RefreshHistoryAsync()
@@ -707,7 +728,7 @@ public partial class MainWindow : Window
             }
             ApplyHistoryFilter();
         }
-        catch (Exception ex) { Debug.WriteLine($"Could not load history from server: {ex.Message}"); }
+        catch (Exception ex) { Log.Write($"Could not load history from server: {ex.Message}"); }
     }
 
     private static bool TryParseAnnouncementContact(string text, out string name, out string phone)
@@ -734,17 +755,17 @@ public partial class MainWindow : Window
                 server,
                 source = announcement ? "announcement" : "direct"
             });
-            if (!response.IsSuccessStatusCode) Debug.WriteLine($"Server did not save phone contact: {(int)response.StatusCode}");
+            if (!response.IsSuccessStatusCode) Log.Write($"Server did not save phone contact: {(int)response.StatusCode}");
         }
-        catch (Exception ex) { Debug.WriteLine($"Could not save phone contact: {ex.Message}"); }
+        catch (Exception ex) { Log.Write($"Could not save phone contact: {ex.Message}"); }
     }
 
-    private void UpsertPhonebookEntry(string name, string phone, string server, long updatedAt)
+    private void UpsertPhonebookEntry(string name, string phone, string server, long updatedAt, bool refreshList = true)
     {
         var current = _phonebookItems.FirstOrDefault(item => item.Phone == phone && item.Server == server);
         if (current is not null) _phonebookItems.Remove(current);
         _phonebookItems.Insert(0, new PhonebookEntry(name, phone, server, DateTimeOffset.FromUnixTimeMilliseconds(updatedAt).ToLocalTime().ToString("dd.MM.yyyy HH:mm:ss")));
-        ApplyPhonebookFilter();
+        if (refreshList) ApplyPhonebookFilter();
     }
 
     private async Task RefreshPhonebookAsync()
@@ -756,26 +777,33 @@ public partial class MainWindow : Window
             var result = await Api.GetFromJsonAsync<PhonebookResponse>(route);
             if (result?.Items is null) return;
             _phonebookItems.Clear();
-            foreach (var item in result.Items.OrderByDescending(item => item.UpdatedAt))
-                UpsertPhonebookEntry(item.Name, item.Phone, item.Server, item.UpdatedAt);
+            // Oldest first: every entry is inserted at the front, so the newest ends up on top. One list refresh at the end, not one per contact.
+            foreach (var item in result.Items.OrderBy(item => item.UpdatedAt))
+                UpsertPhonebookEntry(item.Name, item.Phone, item.Server, item.UpdatedAt, refreshList: false);
+            ApplyPhonebookFilter();
         }
-        catch (Exception ex) { Debug.WriteLine($"Could not load phonebook from server: {ex.Message}"); }
+        catch (Exception ex) { Log.Write($"Could not load phonebook from server: {ex.Message}"); }
     }
 
     private void ApplyPhonebookFilter()
     {
-        if (PhonebookSearchBox is null || PhonebookCount is null || PhonebookSearchClearButton is null || PhonebookSearchPlaceholder is null) return;
-        _visiblePhonebookItems.Clear();
+        if (PhonebookSearchBox is null || PhonebookCount is null || PhonebookSearchClearButton is null || PhonebookSearchPlaceholder is null || PhonebookList is null) return;
         var query = PhonebookSearchBox.Text.Trim();
-        foreach (var item in _phonebookItems)
-            if (query.Length == 0 || item.Name.Contains(query, StringComparison.CurrentCultureIgnoreCase) || item.Phone.Contains(query, StringComparison.OrdinalIgnoreCase))
-                _visiblePhonebookItems.Add(item);
+        var visible = _phonebookItems
+            .Where(item => query.Length == 0 || item.Name.Contains(query, StringComparison.CurrentCultureIgnoreCase) || item.Phone.Contains(query, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        // Two cards per row, so the virtualised list only builds what is on screen.
+        var rows = new List<PhonebookRow>((visible.Count + 1) / 2);
+        for (var i = 0; i < visible.Count; i += 2) rows.Add(new PhonebookRow(visible[i], i + 1 < visible.Count ? visible[i + 1] : null));
+        PhonebookList.ItemsSource = rows;
         PhonebookCount.Text = _settings.Language == "en"
-            ? $"{_visiblePhonebookItems.Count} contacts"
-            : $"{_visiblePhonebookItems.Count} {_visiblePhonebookItems.Count switch { 1 => "контакт", >= 2 and <= 4 => "контакта", _ => "контактов" }}";
+            ? $"{visible.Count} contacts"
+            : $"{visible.Count} {visible.Count switch { 1 => "контакт", >= 2 and <= 4 => "контакта", _ => "контактов" }}";
         PhonebookSearchClearButton.Visibility = query.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
         PhonebookSearchPlaceholder.Visibility = query.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
     }
+
+    private sealed record PhonebookRow(PhonebookEntry Left, PhonebookEntry? Right);
 
     private void PhonebookSearch_Changed(object sender, TextChangedEventArgs e) => ApplyPhonebookFilter();
     private void PhonebookSearchClear_Click(object sender, RoutedEventArgs e) => PhonebookSearchBox.Clear();
@@ -786,12 +814,14 @@ public partial class MainWindow : Window
 
     private void ApplyHistoryFilter()
     {
-        _visibleHistoryItems.Clear();
+        var visible = new List<HistoryEntry>(_historyItems.Count);
         foreach (var item in _historyItems)
         {
             var category = CanonicalHistoryCategory(item.Category);
-            if (_historyFilter == "Все" || category == _historyFilter) _visibleHistoryItems.Add(item);
+            if (_historyFilter == "Все" || category == _historyFilter) visible.Add(item);
         }
+        HistoryList.ItemsSource = visible;
+        UpdateTradeStats();
     }
 
     private void HistoryFilter_Click(object sender, RoutedEventArgs e)
@@ -809,6 +839,71 @@ public partial class MainWindow : Window
     }
 
     private async void RefreshHistory_Click(object sender, RoutedEventArgs e) => await RefreshHistoryAsync();
+
+    private void StatsPeriod_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button button || button.Tag is not string period) return;
+        _statsPeriod = period;
+        foreach (var item in new[] { StatsDayButton, StatsWeekButton, StatsMonthButton })
+        {
+            var active = ReferenceEquals(item, button);
+            item.Background = active ? (System.Windows.Media.Brush)FindResource("AccentBrush") : System.Windows.Media.Brushes.Transparent;
+            item.BorderBrush = active ? (System.Windows.Media.Brush)FindResource("AccentBrush") : System.Windows.Media.Brushes.Transparent;
+            item.Foreground = active ? (System.Windows.Media.Brush)FindResource("AccentTextBrush") : (System.Windows.Media.Brush)FindResource("Muted");
+        }
+        UpdateTradeStats();
+    }
+
+    // shortcut: totals come from the last 1000 history entries the server returns, so a very busy month can be undercounted; raise the GET /history limit if that happens.
+    private void UpdateTradeStats()
+    {
+        if (StatsSoldAmount is null) return;
+        var now = DateTime.Now;
+        var from = _statsPeriod switch
+        {
+            "week" => now.Date.AddDays(-(((int)now.DayOfWeek + 6) % 7)),
+            "month" => new DateTime(now.Year, now.Month, 1),
+            _ => now.Date
+        };
+        long sold = 0, bought = 0;
+        int soldCount = 0, boughtCount = 0;
+        foreach (var item in _historyItems)
+        {
+            if (!DateTime.TryParseExact(item.Time, "dd.MM.yyyy HH:mm:ss", CultureInfo.InvariantCulture, DateTimeStyles.None, out var time) || time < from) continue;
+            if (!TryParseTradeTotal(item.Text, out var isSale, out var amount)) continue;
+            if (isSale) { sold += amount; soldCount++; }
+            else { bought += amount; boughtCount++; }
+        }
+        StatsSoldAmount.Text = FormatRubles(sold);
+        StatsBoughtAmount.Text = FormatRubles(bought);
+        StatsSoldCount.Text = TradeCountText(soldCount);
+        StatsBoughtCount.Text = TradeCountText(boughtCount);
+    }
+
+    private static string FormatRubles(long amount) => amount.ToString("N0", CultureInfo.GetCultureInfo("ru-RU")) + " ₽";
+
+    private string TradeCountText(int count) => _settings.Language == "en"
+        ? count == 0 ? "no trades" : $"{count} {(count == 1 ? "trade" : "trades")}"
+        : count == 0 ? "нет сделок" : $"{count} {(count % 100 is >= 11 and <= 14 ? "сделок" : (count % 10) switch { 1 => "сделка", 2 or 3 or 4 => "сделки", _ => "сделок" })}";
+
+    // Reads the summaries TryParseBoothTrade writes: first line says sale or purchase, "Цена:" line holds the price.
+    private static bool TryParseTradeTotal(string text, out bool isSale, out long amount)
+    {
+        isSale = text.StartsWith("Продажа из павильона", StringComparison.Ordinal);
+        amount = 0;
+        if (!isSale && !text.StartsWith("Покупка в павильон", StringComparison.Ordinal)) return false;
+        var price = Regex.Match(text, @"^Цена:\s*(?<num>\d[\d\s.,]*?)\s*(?<k>тыс)?\.?\s*(?:руб|$)", RegexOptions.Multiline | RegexOptions.IgnoreCase);
+        if (!price.Success) return false;
+        var number = Regex.Replace(price.Groups["num"].Value, @"\s", "");
+        if (price.Groups["k"].Success)
+        {
+            // "1,5 тыс." is a decimal; plain prices use dots/spaces only as thousand separators.
+            if (!decimal.TryParse(number.Replace(',', '.'), NumberStyles.Number, CultureInfo.InvariantCulture, out var thousands)) return false;
+            amount = (long)Math.Round(thousands * 1000);
+        }
+        else if (!long.TryParse(Regex.Replace(number, @"[.,]", ""), out amount)) return false;
+        return true;
+    }
 
     private static bool TryParseBoothTrade(string text, out BoothTrade trade)
     {
@@ -859,9 +954,9 @@ public partial class MainWindow : Window
         try
         {
             using var response = await Api.PostAsJsonAsync("notify", new { id = _settings.UserId, machineId = _settings.MachineId, text });
-            if (!response.IsSuccessStatusCode) Debug.WriteLine($"Telegram notification was rejected: {(int)response.StatusCode}");
+            if (!response.IsSuccessStatusCode) Log.Write($"Telegram notification was rejected: {(int)response.StatusCode}");
         }
-        catch (Exception ex) { Debug.WriteLine($"Could not send Telegram notification: {ex.Message}"); }
+        catch (Exception ex) { Log.Write($"Could not send Telegram notification: {ex.Message}"); }
     }
 
     private void Setting_Changed(object sender, RoutedEventArgs e)
@@ -897,46 +992,13 @@ public partial class MainWindow : Window
             SettingsTabs.SelectedItem = new[] { NotificationsTab, ProgramTab }.First(tab => tab.Visibility == Visibility.Visible);
     }
 
-    private void Theme_Changed(object sender, RoutedEventArgs e)
-    {
-        if (_loading) return;
-        _settings.DarkTheme = ThemeToggle.IsChecked == true;
-        ApplyTheme();
-        SaveSettings();
-    }
-
     private string T(string russian, string english) => _settings.Language == "en" ? english : russian;
-
-    private void ApplyTheme()
-    {
-        var dark = _settings.DarkTheme;
-        Brush("WindowBgBrush", dark ? "#090A0D" : "#ECEEF1");
-        Brush("SidebarBgBrush", dark ? "#0E1013" : "#E2E4E8");
-        Brush("CardBgBrush", dark ? "#15171A" : "#FAFAFB");
-        Brush("Surface2Brush", dark ? "#1C1F23" : "#E7E9EC");
-        Brush("RowBgBrush", dark ? "#202328" : "#EEF0F2");
-        Brush("ButtonBgBrush", dark ? "#262A30" : "#DADDE1");
-        Brush("BorderThemeBrush", dark ? "#353A42" : "#C4C8CE");
-        Brush("InputBorderBrush", dark ? "#3B4048" : "#B7BCC3");
-        Brush("SwitchTrackBrush", dark ? "#3A3F47" : "#B8BEC5");
-        Brush("PrimaryTextBrush", dark ? "#F4F5F6" : "#17191C");
-        Brush("AccentBrush", dark ? "#E5E7EA" : "#34383E");
-        Brush("AccentTextBrush", dark ? "#101114" : "#F4F5F6");
-        Brush("Muted", dark ? "#A7ABB1" : "#60656D");
-        Resources["Panel"] = new System.Windows.Media.SolidColorBrush(Color(dark ? "#15171A" : "#FAFAFB"));
-        Resources["Panel2"] = new System.Windows.Media.SolidColorBrush(Color(dark ? "#1C1F23" : "#E7E9EC"));
-        ThemeModeLabel.Text = _settings.Language == "en" ? (dark ? "Theme: night" : "Theme: day") : (dark ? "Тема: ночь" : "Тема: день");
-
-        static System.Windows.Media.Color Color(string hex) => (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(hex);
-        void Brush(string key, string hex) => Resources[key] = new System.Windows.Media.SolidColorBrush(Color(hex));
-    }
 
     private void Language_Changed(object sender, RoutedEventArgs e)
     {
         if (_loading || !IsLoaded) return;
         _settings.Language = LanguageBox.SelectedIndex == 1 ? "en" : "ru";
         ApplyLanguage();
-        ApplyTheme();
         SaveSettings();
     }
 
@@ -946,11 +1008,14 @@ public partial class MainWindow : Window
         var translations = new Dictionary<string, string>
         {
             ["Вход в приложение"] = "Sign in",
-            ["Введите Telegram ID из Telegram-бота, чтобы войти в приложение."] = "Enter the Telegram ID provided by the Telegram bot to sign in.",
+            ["ТОРГОВЛЯ ПОД КОНТРОЛЕМ"] = "TRADING UNDER CONTROL", ["Павильон, SMS и звонки — сразу в Telegram"] = "Booth, SMS and calls — straight to Telegram",
+            ["Введите Telegram ID и пароль, чтобы войти в приложение."] = "Enter your Telegram ID and password to sign in.",
             ["Условия использования"] = "Terms of use",
             ["TELEGRAM ID"] = "TELEGRAM ID",
-            ["Запросить подключение"] = "Request connection",
-            ["✈ Получить доступ в Telegram"] = "✈ Get access in Telegram", ["✈ Поддержка"] = "✈ Support",
+            ["ПАРОЛЬ"] = "PASSWORD", ["Задать или забыли пароль?"] = "Set or forgot your password?",
+            ["Сохранить пароль"] = "Save password", ["Входить автоматически"] = "Sign in automatically",
+            ["Войти"] = "Log in",
+            ["Получить доступ в Telegram"] = "Get access in Telegram", ["Поддержка"] = "Support",
             ["Обзор"] = "Overview", ["История"] = "History", ["Телефонная книга"] = "Phonebook", ["Поиск по имени или номеру"] = "Search by name or number", ["Общая база входящих номеров игроков · сортировка по последнему контакту"] = "Shared player contact list · sorted by last contact", ["ТЕЛЕФОН"] = "PHONE", ["ПОСЛЕДНЕЕ ИЗМЕНЕНИЕ"] = "LAST UPDATED", ["ИЗМЕНЁН"] = "UPDATED", ["Настройки"] = "Settings", ["Выйти из аккаунта"] = "Log out",
             ["Уведомления"] = "Notifications", ["Настройки программы"] = "App settings",
             ["Разделы и параметры AmzWR"] = "AmzWR sections and preferences",
@@ -959,9 +1024,9 @@ public partial class MainWindow : Window
             ["Уведомления SMS"] = "SMS alerts", ["Уведомления звонков"] = "Call alerts", ["Уведомления о покупке"] = "Purchase alerts", ["Уведомления о продаже"] = "Sale alerts",
             ["Напоминание о слёте павильона"] = "Booth expiry reminder", ["Местное время слёта (чч:мм)"] = "Local booth expiry time (HH:mm)",
             ["Уведомления о голоде"] = "Hunger alerts", ["Уведомления о жажде"] = "Thirst alerts", ["Уведомления о бане"] = "Bath alerts", ["Уведомления о малой нужде"] = "Need alerts",
-            ["ВХОД И ФАЙЛ ЛОГА"] = "LOGIN AND LOG FILE", ["Входить автоматически при запуске"] = "Sign in automatically on launch", ["Выбрать файл chatlog.txt"] = "Choose chatlog.txt", ["ФОН ПРИЛОЖЕНИЯ"] = "APP BACKGROUND", ["Изображение не выбрано"] = "No image selected", ["Изображение не найдено"] = "Image not found", ["Не удалось загрузить изображение"] = "Could not load image", ["Выбрать изображение"] = "Choose image", ["Сбросить"] = "Reset", ["✨ Обновить AmzWR"] = "✨ Update AmzWR", ["ВИДИМОСТЬ ВКЛАДОК"] = "TAB VISIBILITY", ["Показывать «Уведомления»"] = "Show Notifications", ["Эту вкладку нельзя скрыть, чтобы настройки всегда оставались доступны."] = "This tab stays visible so settings remain accessible.",
+            ["ВХОД И ФАЙЛ ЛОГА"] = "LOGIN AND LOG FILE", ["Входить автоматически при запуске"] = "Sign in automatically on launch", ["Выбрать файл chatlog.txt"] = "Choose chatlog.txt", ["✨ Обновить AmzWR"] = "✨ Update AmzWR", ["ВИДИМОСТЬ ВКЛАДОК"] = "TAB VISIBILITY", ["Показывать «Уведомления»"] = "Show Notifications", ["Эту вкладку нельзя скрыть, чтобы настройки всегда оставались доступны."] = "This tab stays visible so settings remain accessible.",
             ["Тема: ночь"] = "Theme: night", ["Тема: день"] = "Theme: day", ["ЯЗЫК"] = "LANGUAGE", ["Панель управления"] = "Dashboard", ["Состояние подключения и последние события игры"] = "Connection status and recent game events", ["МОНИТОРИНГ"] = "MONITORING", ["Все функции включены"] = "All features enabled", ["Все функции выключены"] = "All features disabled", ["ПОДПИСКА"] = "SUBSCRIPTION", ["ОСТАЛОСЬ"] = "REMAINING", ["Выбрать лог"] = "Choose log", ["СОСТОЯНИЕ СЕРВЕРА"] = "SERVER STATUS", ["Есть соединение с сервером"] = "Server connected", ["Нет соединения с сервером"] = "No server connection", ["Amazing.exe запущена"] = "Amazing.exe is running", ["Amazing.exe не запущена"] = "Amazing.exe is not running",
-            ["Нужды"] = "Needs", ["Павильон"] = "Booth", ["Телефон"] = "Phone", ["История уведомлений"] = "Notification history", ["Нужды, события павильона и телефонные уведомления сохраняются в вашей истории на сервере."] = "Needs, booth events and phone alerts are saved to your history on the server.", ["Открыть историю →"] = "Open history →", ["События сохраняются на сервере и доступны после перезапуска."] = "Events are stored on the server and remain available after restart.", ["↻ Обновить"] = "↻ Refresh", ["Все"] = "All", ["СЕРВЕР"] = "SERVER", ["Онлайн"] = "Online", ["Нет соединения"] = "Offline", ["AMZWR  ·  ТИХИЙ ПОМОЩНИК"] = "AMZWR  ·  QUIET GAME ASSISTANT", ["Следит за чатом.\nОстаётся вне игры."] = "Watches the chat.\nStays outside the game.", ["Поймай кота"] = "Catch the cat", ["Кликай по коту, пока не закончилось время."] = "Click the cat before time runs out.", ["СЧЁТ"] = "SCORE", ["ВРЕМЯ"] = "TIME", ["Готов сыграть?"] = "Ready to play?", ["Лови кота, пока идёт время!"] = "Catch the cat before time runs out!", ["Начать игру"] = "Start game", ["Начать заново"] = "Restart", ["Ещё раунд"] = "Play again", ["CHATLOG"] = "CHATLOG"
+            ["Нужды"] = "Needs", ["Павильон"] = "Booth", ["Телефон"] = "Phone", ["История уведомлений"] = "Notification history", ["Нужды, события павильона и телефонные уведомления сохраняются в вашей истории на сервере."] = "Needs, booth events and phone alerts are saved to your history on the server.", ["Открыть историю →"] = "Open history →", ["События сохраняются на сервере и доступны после перезапуска."] = "Events are stored on the server and remain available after restart.", ["↻ Обновить"] = "↻ Refresh", ["Все"] = "All", ["СЕРВЕР"] = "SERVER", ["Онлайн"] = "Online", ["Нет соединения"] = "Offline", ["AMZWR  ·  ТИХИЙ ПОМОЩНИК"] = "AMZWR  ·  QUIET GAME ASSISTANT", ["Следит за чатом.\nОстаётся вне игры."] = "Watches the chat.\nStays outside the game.", ["AMAZINGWR  ·  ПАВИЛЬОН"] = "AMAZINGWR  ·  BOOTH", ["Статистика торговли"] = "Trading stats", ["Сегодня"] = "Today", ["Неделя"] = "Week", ["Месяц"] = "Month", ["Продажи"] = "Sales", ["Закупки"] = "Purchases", ["Считается по истории сделок в павильоне"] = "Based on your booth trade history",["CHATLOG"] = "CHATLOG"
         };
         var words = english ? translations : translations.ToDictionary(pair => pair.Value, pair => pair.Key);
 
@@ -974,7 +1039,7 @@ public partial class MainWindow : Window
         }
         Visit(this);
         ApplyPhonebookFilter();
-        ThemeModeLabel.Text = english ? (_settings.DarkTheme ? "Theme: night" : "Theme: day") : (_settings.DarkTheme ? "Тема: ночь" : "Тема: день");
+        UpdateTradeStats();
     }
 
     private void Overview_Click(object sender, RoutedEventArgs e)
@@ -1039,32 +1104,46 @@ public partial class MainWindow : Window
         SaveSettings();
     }
 
-    private void Logout_Click(object sender, RoutedEventArgs e)
+    private void Logout_Click(object sender, RoutedEventArgs e) => SignOut();
+
+    /// <summary>Back to the sign-in screen. With a message (session ended by the server) the Telegram ID and auto-login stay as they were.</summary>
+    private void SignOut(string? endedMessage = null)
     {
+        var forced = endedMessage is not null;
         _timer.Stop();
         _monitoring = false;
         _settings.Monitoring = false;
-        _settings.UserId = "";
-        _settings.AutoLogin = false;
+        if (!forced)
+        {
+            _settings.UserId = "";
+            _settings.AutoLogin = false;
+            _settings.SavePassword = false;
+            _settings.SavedPassword = "";
+        }
+        _settings.Token = "";
+        ApplyToken("");
         _expiresAt = 0;
         SetWindowMode(authenticated: false);
         SaveSettings();
         _loading = true;
         MonitoringToggle.IsChecked = false;
-        ActivationAutoLoginToggle.IsChecked = false;
-        SettingsAutoLoginToggle.IsChecked = false;
-        TelegramIdBox.Text = "";
+        ActivationAutoLoginToggle.IsChecked = _settings.AutoLogin;
+        SettingsAutoLoginToggle.IsChecked = _settings.AutoLogin;
+        SavePasswordToggle.IsChecked = _settings.SavePassword;
+        TelegramIdBox.Text = _settings.UserId;
+        PasswordBox.Password = "";
         _loading = false;
         ProfileAvatar.Source = null;
         MainStatus.Text = T("Выключено", "Disabled");
+        MainStatus.Foreground = (System.Windows.Media.Brush)FindResource("Muted");
         SubscriptionStatus.Text = T("Не активна", "Inactive");
         SubscriptionTime.Text = "—";
         ProfileName.Text = T("Telegram аккаунт", "Telegram account");
         ProfileHandle.Text = "";
-        ActivationMessage.Text = "";
-        ConnectButton.Content = "Запросить подключение";
+        ActivationMessage.Text = endedMessage ?? "";
         AppView.Visibility = Visibility.Collapsed;
         ActivationView.Visibility = Visibility.Visible;
+        if (!IsVisible) RestoreFromTray();
     }
 
     private void ChooseLog_Click(object sender, RoutedEventArgs e)
@@ -1074,63 +1153,6 @@ public partial class MainWindow : Window
         _settings.LogPath = dialog.FileName;
         SettingsLogPath.Text = dialog.FileName;
         ResetTailToEnd(); SaveSettings();
-    }
-
-    private void ChooseBackground_Click(object sender, RoutedEventArgs e)
-    {
-        var dialog = new OpenFileDialog
-        {
-            Title = T("Выберите фоновое изображение", "Choose a background image"),
-            Filter = "Изображения (*.png;*.jpg;*.jpeg;*.bmp)|*.png;*.jpg;*.jpeg;*.bmp|Все файлы (*.*)|*.*",
-            CheckFileExists = true
-        };
-        if (dialog.ShowDialog(this) != true) return;
-        _settings.BackgroundImagePath = dialog.FileName;
-        ApplyBackgroundImage();
-        SaveSettings();
-    }
-
-    private void ResetBackground_Click(object sender, RoutedEventArgs e)
-    {
-        _settings.BackgroundImagePath = "";
-        ApplyBackgroundImage();
-        SaveSettings();
-    }
-
-    private void ApplyBackgroundImage()
-    {
-        var path = _settings.BackgroundImagePath;
-        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
-        {
-            AppBackgroundImage.Source = null;
-            AppBackgroundImage.Visibility = Visibility.Collapsed;
-            BackgroundImagePathLabel.Text = string.IsNullOrWhiteSpace(path)
-                ? T("Изображение не выбрано", "No image selected")
-                : T("Изображение не найдено", "Image not found");
-            BackgroundImagePathLabel.ToolTip = path;
-            return;
-        }
-        try
-        {
-            var image = new BitmapImage();
-            image.BeginInit();
-            image.CacheOption = BitmapCacheOption.OnLoad;
-            image.UriSource = new Uri(path, UriKind.Absolute);
-            image.EndInit();
-            image.Freeze();
-            AppBackgroundImage.Source = image;
-            AppBackgroundImage.Visibility = Visibility.Visible;
-            BackgroundImagePathLabel.Text = Path.GetFileName(path);
-            BackgroundImagePathLabel.ToolTip = path;
-        }
-        catch (Exception ex)
-        {
-            AppBackgroundImage.Source = null;
-            AppBackgroundImage.Visibility = Visibility.Collapsed;
-            BackgroundImagePathLabel.Text = T("Не удалось загрузить изображение", "Could not load image");
-            BackgroundImagePathLabel.ToolTip = path;
-            Debug.WriteLine($"Could not load background image: {ex.Message}");
-        }
     }
 
     private ClientSettings LoadSettings()
@@ -1143,7 +1165,7 @@ public partial class MainWindow : Window
                 if (settings is not null) { if (string.IsNullOrWhiteSpace(settings.LogPath)) settings.LogPath = DefaultLog; return settings; }
             }
         }
-        catch { }
+        catch (Exception ex) { Log.Write("Could not read settings.json, starting with defaults", ex); }
         return new ClientSettings { UserId = "", LogPath = DefaultLog, MachineId = Guid.NewGuid().ToString("D") };
     }
 
@@ -1154,16 +1176,19 @@ public partial class MainWindow : Window
             Directory.CreateDirectory(Path.GetDirectoryName(SettingsFile)!);
             File.WriteAllText(SettingsFile, JsonSerializer.Serialize(_settings, new JsonSerializerOptions { WriteIndented = true }));
         }
-        catch (Exception ex) { Debug.WriteLine(ex); }
+        catch (Exception ex) { Log.Write(ex); }
     }
 
     private sealed class ClientSettings
     {
         public string UserId { get; set; } = "";
         public bool AutoLogin { get; set; }
+        public bool SavePassword { get; set; }
+        public string Token { get; set; } = "";          // DPAPI-protected session token
+        public string SavedPassword { get; set; } = "";  // DPAPI-protected, only when SavePassword is on
         public string MachineId { get; set; } = "";
         public string LogPath { get; set; } = DefaultLog;
-        public string BackgroundImagePath { get; set; } = "";
+
         public bool Monitoring { get; set; }
         public bool Sms { get; set; } = true;
         public bool Calls { get; set; } = true;
@@ -1181,11 +1206,33 @@ public partial class MainWindow : Window
     }
 
     private sealed record TelegramProfile(string Id, string Username, string FirstName, long ExpiresAt, bool TrialUsed);
-    private sealed record ConnectResult(bool Ok, bool Pending);
+    private sealed record LoginResult(bool Ok, string? Token);
     private sealed record ApiError(string? Error);
     private sealed record BridgeHealth(bool Ok, bool TelegramOk, long TelegramLastSuccessAt, string? TelegramError);
-    private sealed class VersionResponse { public string Version { get; set; } = ""; public string DownloadUrl { get; set; } = ""; }
-    private sealed record HistoryEntry(string Time, string Category, string Text);
+    private sealed class VersionResponse { public string Version { get; set; } = ""; public string DownloadUrl { get; set; } = ""; public string? Sha256 { get; set; } }
+    private sealed record HistoryEntry(string Time, string Category, string Text)
+    {
+        // Category may be localised ("Needs"/"Booth"/"Phone"); colours follow the Russian key.
+        private string Key => Category switch { "Needs" => "Нужды", "Booth" => "Павильон", "Phone" => "Телефон", _ => Category };
+        private System.Windows.Media.Color AccentColor => Key switch
+        {
+            "Нужды" => System.Windows.Media.Color.FromRgb(0xFF, 0x2E, 0x2E),
+            "Павильон" => System.Windows.Media.Color.FromRgb(0xF2, 0xC4, 0x6D),
+            _ => System.Windows.Media.Color.FromRgb(0x5B, 0xB8, 0xFF)
+        };
+        public System.Windows.Media.Brush AccentBrush => Frozen(AccentColor);
+        public System.Windows.Media.Brush ChipBrush => Frozen(System.Windows.Media.Color.FromArgb(0x2E, AccentColor.R, AccentColor.G, AccentColor.B));
+        public string Title => Text.Split('\n', 2)[0].Trim();
+        // Booth trades arrive as several lines ("Предмет: …\nЦена: …"); show them as one compact line.
+        public string Details => Text.Contains('\n') ? string.Join("   ·   ", Text[(Text.IndexOf('\n') + 1)..].Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)) : "";
+        public Visibility DetailsVisibility => Details.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+    private static System.Windows.Media.Brush Frozen(System.Windows.Media.Color color)
+    {
+        var brush = new System.Windows.Media.SolidColorBrush(color);
+        brush.Freeze();
+        return brush;
+    }
     private static string GetGameServerLabel(string server) => int.TryParse(server, out var index) && index >= 1 && index <= 12
         ? $"[{index:00}] {new[] { "RED", "YELLOW", "GREEN", "AZURE", "SILVER", "ROSE", "BLACK", "SKY", "TITAN", "X", "FIRE", "LIME" }[index - 1]}"
         : $"[{server}]";
@@ -1206,7 +1253,8 @@ public partial class MainWindow : Window
     {
         public string Initial => string.IsNullOrWhiteSpace(Name) ? "?" : Name.Trim()[0].ToString().ToUpperInvariant();
         public string ServerLabel => GetGameServerLabel(Server);
-        public System.Windows.Media.Brush ServerBrush => new System.Windows.Media.SolidColorBrush(GetGameServerColor(Server));
+        public System.Windows.Media.Brush ServerBrush => Frozen(GetGameServerColor(Server));
+        public System.Windows.Media.Brush ServerChipBrush { get { var c = GetGameServerColor(Server); return Frozen(System.Windows.Media.Color.FromArgb(0x2E, c.R, c.G, c.B)); } }
     }
     private sealed class HistoryResponse { public List<HistoryRecord>? Items { get; set; } }
     private sealed class PhonebookResponse { public List<PhonebookRecord>? Items { get; set; } }

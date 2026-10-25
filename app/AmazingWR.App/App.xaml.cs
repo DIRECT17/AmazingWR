@@ -15,6 +15,7 @@ public partial class App : System.Windows.Application
 
     protected override void OnStartup(StartupEventArgs e)
     {
+        if (Updater.TryApply(e.Args)) { Shutdown(); return; }
         _singleInstanceMutex = new Mutex(initiallyOwned: true, name: @"Local\AmazingWR.SingleInstance", createdNew: out var createdNew);
         _ownsSingleInstanceMutex = createdNew;
         if (!createdNew)

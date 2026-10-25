@@ -13,6 +13,7 @@
 
   <ItemGroup>
     <Resource Include="..\..\assets\amzwr-icon.png" Link="amzwr-icon.png" />
+    <Resource Include="..\..\assets\art\*.*" LinkBase="art" />
   </ItemGroup>
 
 </Project>
