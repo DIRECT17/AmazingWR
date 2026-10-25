@@ -140,8 +140,45 @@ public static class AmazingBrand {
             Text(dc, "AMAZINGWR · AMAZING ROLEPLAY", 72, 650, 14, "#6A6B75");
         }), Path.Combine(root, "assets", "welcome.png"));
     }
+    static void BannerChip(DrawingContext dc, double x, double y, double w, string dot, string label) {
+        Card(dc, "#111114", "#2A2A30", x, y, w, 36, 18);
+        dc.DrawEllipse(B(dot), null, new Point(x + 20, y + 18), 5.5, 5.5);
+        Text(dc, label, x + 36, y + 7, 15, "#F4F6FA", true);
+    }
+    // README banner (docs/images/readme-banner.png): same look as the app and the bot picture.
+    static void BuildBanner(string root) {
+        var art = Path.Combine(root, "assets", "art");
+        var background = Load(Path.Combine(art, "bg-red.jpg"));
+        var boss = Load(Path.Combine(art, "hero-boss.png"));
+        var dir = Path.Combine(root, "docs", "images");
+        Directory.CreateDirectory(dir);
+        Png(Canvas(1200, 330, dc => {
+            var frame = new Rect(0, 0, 1200, 330);
+            dc.PushClip(new RectangleGeometry(frame, 24, 24));
+            dc.DrawRectangle(B("#08080A"), null, frame);
+            DrawCover(dc, background, new Rect(560, 0, 640, 330));
+            var glow = new RadialGradientBrush(Color.FromArgb(150, 255, 46, 46), Color.FromArgb(0, 255, 46, 46));
+            glow.Center = new Point(.5, .5); glow.GradientOrigin = new Point(.5, .5); glow.RadiusX = glow.RadiusY = .5;
+            dc.DrawEllipse(glow, null, new Point(1000, 190), 330, 260);
+            dc.DrawRectangle(new LinearGradientBrush(Color.FromArgb(255, 8, 8, 10), Color.FromArgb(0, 8, 8, 10), new Point(0, 0), new Point(1, 0)), null, new Rect(560, 0, 360, 330));
+            dc.DrawImage(boss, new Rect(870, 4, 300, 371));
+            dc.Pop();
+            dc.DrawRoundedRectangle(null, new Pen(B("#2A2A30"), 2), new Rect(1, 1, 1198, 328), 24, 24);
+
+            Card(dc, "#0A0A0C", "#34343C", 54, 100, 130, 130, 28);
+            DrawCat(dc, 119, 165, 98, "#F4F5F6");
+            Text(dc, "ПОМОЩНИК ДЛЯ AMAZING RP", 220, 78, 15, "#FF3B3B", true);
+            Text(dc, "AmazingWR", 214, 98, 78, "#F4F6FA", true);
+            Round(dc, "#FF2E2E", 220, 204, 96, 7, 3.5);
+            Text(dc, "Сделки в павильоне · SMS · звонки · телефонная книга", 220, 222, 20, "#A6A8B3");
+            BannerChip(dc, 220, 268, 140, "#F2C46D", "Павильон");
+            BannerChip(dc, 372, 268, 164, "#5BB8FF", "SMS и звонки");
+            BannerChip(dc, 548, 268, 208, "#FF2E2E", "Нужды персонажа");
+        }), Path.Combine(dir, "readme-banner.png"));
+    }
     public static void Build(string root) {
         BuildWelcome(root);
+        BuildBanner(root);
         BuildLogos(root);
     }
 }

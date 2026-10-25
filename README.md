@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/images/readme-banner.svg" alt="AmazingWR — помощник для Amazing RP" width="100%">
+  <img src="docs/images/readme-banner.png" alt="AmazingWR — помощник для Amazing RP" width="100%">
 </p>
 
 <div align="center">
