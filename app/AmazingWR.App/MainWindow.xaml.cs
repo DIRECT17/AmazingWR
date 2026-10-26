@@ -892,14 +892,15 @@ public partial class MainWindow : Window
         isSale = text.StartsWith("Продажа из павильона", StringComparison.Ordinal);
         amount = 0;
         if (!isSale && !text.StartsWith("Покупка в павильон", StringComparison.Ordinal)) return false;
-        var price = Regex.Match(text, @"^Цена:\s*(?<num>\d[\d\s.,]*?)\s*(?<k>тыс)?\.?\s*(?:руб|$)", RegexOptions.Multiline | RegexOptions.IgnoreCase);
+        var price = Regex.Match(text, @"^Цена:\s*(?<num>\d[\d\s.,]*?)\s*(?<k>тыс|млрд|млн)?\.?\s*(?:руб|$)", RegexOptions.Multiline | RegexOptions.IgnoreCase);
         if (!price.Success) return false;
         var number = Regex.Replace(price.Groups["num"].Value, @"\s", "");
         if (price.Groups["k"].Success)
         {
-            // "1,5 тыс." is a decimal; plain prices use dots/spaces only as thousand separators.
-            if (!decimal.TryParse(number.Replace(',', '.'), NumberStyles.Number, CultureInfo.InvariantCulture, out var thousands)) return false;
-            amount = (long)Math.Round(thousands * 1000);
+            // "1,5 тыс." / "2 млн" are decimals with a multiplier; plain prices use dots/spaces only as thousand separators.
+            if (!decimal.TryParse(number.Replace(',', '.'), NumberStyles.Number, CultureInfo.InvariantCulture, out var scaled)) return false;
+            var multiplier = price.Groups["k"].Value.ToLowerInvariant() switch { "млрд" => 1_000_000_000m, "млн" => 1_000_000m, _ => 1_000m };
+            amount = (long)Math.Round(scaled * multiplier);
         }
         else if (!long.TryParse(Regex.Replace(number, @"[.,]", ""), out amount)) return false;
         return true;
@@ -911,7 +912,7 @@ public partial class MainWindow : Window
         // Player bought in your booth Item for 10 тыс. руб.
         // Player sold to your booth Item (9 кг) for 900 руб.
         var boughtFromBooth = Regex.Match(text,
-            @"^(?<player>[\p{L}\p{N}_]+)\s+купил\s+в\s+Вашем\s+павильоне\s+(?<item>.+?)\s+за\s+(?<price>[\d\s.,]+(?:тыс\.?\s*)?(?:руб(?:лей|ля|\.)?))\.?$",
+            @"^(?<player>[\p{L}\p{N}_]+)\s+купил\s+в\s+Вашем\s+павильоне\s+(?<item>.+?)\s+за\s+(?<price>[\d\s.,]+(?:(?:тыс|млн|млрд)\.?\s*)?(?:руб(?:лей|ля|\.)?))\.?$",
             RegexOptions.IgnoreCase);
         if (boughtFromBooth.Success)
         {
@@ -923,7 +924,7 @@ public partial class MainWindow : Window
         }
 
         var soldToBooth = Regex.Match(text,
-            @"^(?<player>[\p{L}\p{N}_]+)\s+продал\s+Вашему\s+павильону\s+(?<item>.+?)\s+за\s+(?<price>[\d\s.,]+(?:тыс\.?\s*)?(?:руб(?:лей|ля|\.)?))\.?$",
+            @"^(?<player>[\p{L}\p{N}_]+)\s+продал\s+Вашему\s+павильону\s+(?<item>.+?)\s+за\s+(?<price>[\d\s.,]+(?:(?:тыс|млн|млрд)\.?\s*)?(?:руб(?:лей|ля|\.)?))\.?$",
             RegexOptions.IgnoreCase);
         if (soldToBooth.Success)
         {
@@ -942,8 +943,11 @@ public partial class MainWindow : Window
 
     private static string ExtractTradeQuantity(string item)
     {
-        var quantity = Regex.Match(item, @"(?:^|\s|х|x)(?<count>\d+)\s*(?:шт(?:\.|ук(?:а|и)?)?)(?=\s|$)", RegexOptions.IgnoreCase);
-        return quantity.Success ? quantity.Groups["count"].Value : "1";
+        // The game writes the stack size in brackets ("Перец (145 шт.)", "Готовая рыба (9 кг)"); a plain "5 шт." or "x5" works too.
+        var quantity = Regex.Match(item, @"(?:^|[\s(хx])(?<count>\d+(?:[.,]\d+)?)\s*(?<unit>шт(?:\.|ук(?:а|и)?)?|кг|л|г)(?=[\s).,;]|$)", RegexOptions.IgnoreCase);
+        if (!quantity.Success) return "1";
+        var unit = quantity.Groups["unit"].Value.ToLowerInvariant();
+        return unit.StartsWith("шт") ? quantity.Groups["count"].Value : $"{quantity.Groups["count"].Value} {unit}";
     }
 
     private enum BoothTradeKind { PlayerBought, PlayerSold }
