@@ -741,7 +741,7 @@ public partial class MainWindow : Window
 
     private async Task SavePhoneContactAsync(string name, string phone, bool announcement = false)
     {
-        if (IsUnknownPhoneContact(name) || string.IsNullOrWhiteSpace(phone) || string.IsNullOrWhiteSpace(_settings.UserId)) return;
+        if (!Regex.IsMatch(name, @"^[A-Za-z]+_[A-Za-z]+$") || !Regex.IsMatch(phone, @"^\d{3,7}$") || string.IsNullOrWhiteSpace(_settings.UserId)) return;
         var server = ReadGameServer() ?? "3";
         UpsertPhonebookEntry(name, phone, server, DateTimeOffset.Now.ToUnixTimeMilliseconds());
         try
@@ -1237,8 +1237,8 @@ public partial class MainWindow : Window
         brush.Freeze();
         return brush;
     }
-    private static string GetGameServerLabel(string server) => int.TryParse(server, out var index) && index >= 1 && index <= 12
-        ? $"[{index:00}] {new[] { "RED", "YELLOW", "GREEN", "AZURE", "SILVER", "ROSE", "BLACK", "SKY", "TITAN", "X", "FIRE", "LIME" }[index - 1]}"
+    private static string GetGameServerLabel(string server) => int.TryParse(server, out var index) && index >= 1 && index <= 13
+        ? $"[{index:00}] {new[] { "RED", "YELLOW", "GREEN", "AZURE", "SILVER", "ROSE", "BLACK", "SKY", "TITAN", "X", "FIRE", "LIME", "NIGHT" }[index - 1]}"
         : $"[{server}]";
 
     private static System.Windows.Media.Color GetGameServerColor(string server)
@@ -1247,7 +1247,7 @@ public partial class MainWindow : Window
         {
             "1" => "#E6312B", "2" => "#F0B638", "3" => "#35C875", "4" => "#4B58F4",
             "5" => "#A8A9AE", "6" => "#F45CB7", "7" => "#70737B", "8" => "#36C7E5",
-            "9" => "#8B55B0", "10" => "#D80B54", "11" => "#FF641B", "12" => "#B5F53A",
+            "9" => "#8B55B0", "10" => "#D80B54", "11" => "#FF641B", "12" => "#B5F53A", "13" => "#7A7CFF",
             _ => "#AAB0BA"
         };
         return (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(hex);
