@@ -892,17 +892,19 @@ public partial class MainWindow : Window
         isSale = text.StartsWith("Продажа из павильона", StringComparison.Ordinal);
         amount = 0;
         if (!isSale && !text.StartsWith("Покупка в павильон", StringComparison.Ordinal)) return false;
-        var price = Regex.Match(text, @"^Цена:\s*(?<num>\d[\d\s.,]*?)\s*(?<k>тыс|млрд|млн)?\.?\s*(?:руб|$)", RegexOptions.Multiline | RegexOptions.IgnoreCase);
+        var price = Regex.Match(text, @"^Цена:\s*(?<p>\d.*?)\s*(?:руб|$)", RegexOptions.Multiline | RegexOptions.IgnoreCase);
         if (!price.Success) return false;
-        var number = Regex.Replace(price.Groups["num"].Value, @"\s", "");
-        if (price.Groups["k"].Success)
+        var value = price.Groups["p"].Value;
+        if (!value.Contains("тыс", StringComparison.OrdinalIgnoreCase) && !value.Contains("млн", StringComparison.OrdinalIgnoreCase) && !value.Contains("млрд", StringComparison.OrdinalIgnoreCase))
+            return long.TryParse(Regex.Replace(value, @"[\s.,]", ""), out amount);
+        // "1 млн. 200 тыс." and "155 тыс. 555" are sums of parts; a part with a unit is a decimal with a multiplier.
+        decimal total = 0;
+        foreach (Match part in Regex.Matches(value, @"(?<num>\d+(?:[.,]\d+)?)\s*(?<k>млрд|млн|тыс)?", RegexOptions.IgnoreCase))
         {
-            // "1,5 тыс." / "2 млн" are decimals with a multiplier; plain prices use dots/spaces only as thousand separators.
-            if (!decimal.TryParse(number.Replace(',', '.'), NumberStyles.Number, CultureInfo.InvariantCulture, out var scaled)) return false;
-            var multiplier = price.Groups["k"].Value.ToLowerInvariant() switch { "млрд" => 1_000_000_000m, "млн" => 1_000_000m, _ => 1_000m };
-            amount = (long)Math.Round(scaled * multiplier);
+            if (!decimal.TryParse(part.Groups["num"].Value.Replace(',', '.'), NumberStyles.Number, CultureInfo.InvariantCulture, out var n)) return false;
+            total += n * part.Groups["k"].Value.ToLowerInvariant() switch { "млрд" => 1_000_000_000m, "млн" => 1_000_000m, "тыс" => 1_000m, _ => 1m };
         }
-        else if (!long.TryParse(Regex.Replace(number, @"[.,]", ""), out amount)) return false;
+        amount = (long)Math.Round(total);
         return true;
     }
 
@@ -912,7 +914,7 @@ public partial class MainWindow : Window
         // Player bought in your booth Item for 10 тыс. руб.
         // Player sold to your booth Item (9 кг) for 900 руб.
         var boughtFromBooth = Regex.Match(text,
-            @"^(?<player>[\p{L}\p{N}_]+)\s+купил\s+в\s+Вашем\s+павильоне\s+(?<item>.+?)\s+за\s+(?<price>[\d\s.,]+(?:(?:тыс|млн|млрд)\.?\s*)?(?:руб(?:лей|ля|\.)?))\.?$",
+            @"^(?<player>[\p{L}\p{N}_]+)\s+купил\s+в\s+Вашем\s+павильоне\s+(?<item>.+?)\s+за\s+(?<price>\d.*?\s*руб(?:лей|ля|\.)?)\.?$",
             RegexOptions.IgnoreCase);
         if (boughtFromBooth.Success)
         {
@@ -924,7 +926,7 @@ public partial class MainWindow : Window
         }
 
         var soldToBooth = Regex.Match(text,
-            @"^(?<player>[\p{L}\p{N}_]+)\s+продал\s+Вашему\s+павильону\s+(?<item>.+?)\s+за\s+(?<price>[\d\s.,]+(?:(?:тыс|млн|млрд)\.?\s*)?(?:руб(?:лей|ля|\.)?))\.?$",
+            @"^(?<player>[\p{L}\p{N}_]+)\s+продал\s+Вашему\s+павильону\s+(?<item>.+?)\s+за\s+(?<price>\d.*?\s*руб(?:лей|ля|\.)?)\.?$",
             RegexOptions.IgnoreCase);
         if (soldToBooth.Success)
         {
