@@ -59,6 +59,7 @@ public partial class MainWindow : Window
         _settings = LoadSettings();
         if (string.IsNullOrWhiteSpace(_settings.MachineId)) _settings.MachineId = Guid.NewGuid().ToString("D");
         SaveSettings();
+        FillGroupServerBox();
         _loading = true;
         TelegramIdBox.Text = _settings.UserId;
         ApplyToken(Secrets.Unprotect(_settings.Token));
@@ -723,7 +724,7 @@ public partial class MainWindow : Window
             {
                 var time = DateTimeOffset.FromUnixTimeMilliseconds(item.CreatedAt).ToLocalTime().ToString("dd.MM.yyyy HH:mm:ss");
                 var category = CanonicalHistoryCategory(item.Category);
-                if (category is null) continue;
+                if (category is null || (_settings.HistoryClearedAt.TryGetValue(category, out var clearedAt) && item.CreatedAt <= clearedAt)) continue;
                 _historyItems.Add(new HistoryEntry(time, LocalizedHistoryCategory(category), item.Text));
             }
             ApplyHistoryFilter();
@@ -835,6 +836,33 @@ public partial class MainWindow : Window
             item.BorderBrush = ReferenceEquals(item, active) ? (System.Windows.Media.Brush)FindResource("AccentBrush") : System.Windows.Media.Brushes.Transparent;
             item.Foreground = ReferenceEquals(item, active) ? (System.Windows.Media.Brush)FindResource("AccentTextBrush") : (System.Windows.Media.Brush)FindResource("Muted");
         }
+        ApplyHistoryFilter();
+    }
+
+
+    private int _historyClearToken;
+
+    // Clears the active history tab ("Все" clears everything). The first click arms the button, the second one confirms.
+    private async void ClearHistory_Click(object sender, RoutedEventArgs e)
+    {
+        var token = ++_historyClearToken;
+        var label = _historyFilter == "Все" ? T("всё", "everything") : $"«{LocalizedHistoryCategory(_historyFilter)}»";
+        if (HistoryClearButton.Tag is not "armed")
+        {
+            HistoryClearButton.Tag = "armed";
+            HistoryClearButton.Content = T($"Точно очистить {label}?", $"Really clear {label}?");
+            await Task.Delay(4000);
+            if (token == _historyClearToken) { HistoryClearButton.Tag = null; HistoryClearButton.Content = T("🗑 Очистить", "🗑 Clear"); }
+            return;
+        }
+        HistoryClearButton.Tag = null;
+        HistoryClearButton.Content = T("🗑 Очистить", "🗑 Clear");
+        // Local only: the server keeps the history, the client just stops showing entries up to this moment (also after a refresh or restart).
+        var now = DateTimeOffset.Now.ToUnixTimeMilliseconds();
+        foreach (var category in _historyFilter == "Все" ? new[] { "Нужды", "Павильон", "Телефон" } : new[] { _historyFilter }) _settings.HistoryClearedAt[category] = now;
+        SaveSettings();
+        for (var i = _historyItems.Count - 1; i >= 0; i--)
+            if (_historyFilter == "Все" || CanonicalHistoryCategory(_historyItems[i].Category) == _historyFilter) _historyItems.RemoveAt(i);
         ApplyHistoryFilter();
     }
 
@@ -1032,7 +1060,7 @@ public partial class MainWindow : Window
             ["Уведомления о голоде"] = "Hunger alerts", ["Уведомления о жажде"] = "Thirst alerts", ["Уведомления о бане"] = "Bath alerts", ["Уведомления о малой нужде"] = "Need alerts",
             ["ВХОД И ФАЙЛ ЛОГА"] = "LOGIN AND LOG FILE", ["Входить автоматически при запуске"] = "Sign in automatically on launch", ["Выбрать файл chatlog.txt"] = "Choose chatlog.txt", ["✨ Обновить AmzWR"] = "✨ Update AmzWR", ["ВИДИМОСТЬ ВКЛАДОК"] = "TAB VISIBILITY", ["Показывать «Уведомления»"] = "Show Notifications", ["Эту вкладку нельзя скрыть, чтобы настройки всегда оставались доступны."] = "This tab stays visible so settings remain accessible.",
             ["Тема: ночь"] = "Theme: night", ["Тема: день"] = "Theme: day", ["ЯЗЫК"] = "LANGUAGE", ["Панель управления"] = "Dashboard", ["Состояние подключения и последние события игры"] = "Connection status and recent game events", ["МОНИТОРИНГ"] = "MONITORING", ["Все функции включены"] = "All features enabled", ["Все функции выключены"] = "All features disabled", ["ПОДПИСКА"] = "SUBSCRIPTION", ["ОСТАЛОСЬ"] = "REMAINING", ["Выбрать лог"] = "Choose log", ["СОСТОЯНИЕ СЕРВЕРА"] = "SERVER STATUS", ["Есть соединение с сервером"] = "Server connected", ["Нет соединения с сервером"] = "No server connection", ["Amazing.exe запущена"] = "Amazing.exe is running", ["Amazing.exe не запущена"] = "Amazing.exe is not running",
-            ["Нужды"] = "Needs", ["Павильон"] = "Booth", ["Телефон"] = "Phone", ["История уведомлений"] = "Notification history", ["Нужды, события павильона и телефонные уведомления сохраняются в вашей истории на сервере."] = "Needs, booth events and phone alerts are saved to your history on the server.", ["Открыть историю →"] = "Open history →", ["События сохраняются на сервере и доступны после перезапуска."] = "Events are stored on the server and remain available after restart.", ["↻ Обновить"] = "↻ Refresh", ["Все"] = "All", ["СЕРВЕР"] = "SERVER", ["Онлайн"] = "Online", ["Нет соединения"] = "Offline", ["AMZWR  ·  ТИХИЙ ПОМОЩНИК"] = "AMZWR  ·  QUIET GAME ASSISTANT", ["Следит за чатом.\nОстаётся вне игры."] = "Watches the chat.\nStays outside the game.", ["AMAZINGWR  ·  ПАВИЛЬОН"] = "AMAZINGWR  ·  BOOTH", ["Статистика торговли"] = "Trading stats", ["Сегодня"] = "Today", ["Неделя"] = "Week", ["Месяц"] = "Month", ["Продажи"] = "Sales", ["Закупки"] = "Purchases", ["Считается по истории сделок в павильоне"] = "Based on your booth trade history",["CHATLOG"] = "CHATLOG"
+            ["Нужды"] = "Needs", ["Павильон"] = "Booth", ["Телефон"] = "Phone", ["История уведомлений"] = "Notification history", ["Нужды, события павильона и телефонные уведомления сохраняются в вашей истории на сервере."] = "Needs, booth events and phone alerts are saved to your history on the server.", ["Открыть историю →"] = "Open history →", ["События сохраняются на сервере и доступны после перезапуска."] = "Events are stored on the server and remain available after restart.", ["↻ Обновить"] = "↻ Refresh", ["Свободная группа"] = "Free group", ["Свободные группы"] = "Free groups", ["Все серверы"] = "All servers", ["Написать автору ↗"] = "Message the author ↗", ["Открыть пост в Telegram ↗"] = "Open the post in Telegram ↗", ["Поиск по тексту и автору"] = "Search by text or author", ["Новые посты из группы без перехода в мессенджер."] = "New posts from the group without leaving the app.", ["Открыть в Telegram ↗"] = "Open in Telegram ↗", ["Постов пока нет. Новые появятся здесь, как только их опубликуют в группе."] = "No posts yet. New ones will appear here as soon as they are published in the group.", ["🗑 Очистить"] = "🗑 Clear", ["Все"] = "All", ["СЕРВЕР"] = "SERVER", ["Онлайн"] = "Online", ["Нет соединения"] = "Offline", ["AMZWR  ·  ТИХИЙ ПОМОЩНИК"] = "AMZWR  ·  QUIET GAME ASSISTANT", ["Следит за чатом.\nОстаётся вне игры."] = "Watches the chat.\nStays outside the game.", ["AMAZINGWR  ·  ПАВИЛЬОН"] = "AMAZINGWR  ·  BOOTH", ["Статистика торговли"] = "Trading stats", ["Сегодня"] = "Today", ["Неделя"] = "Week", ["Месяц"] = "Month", ["Продажи"] = "Sales", ["Закупки"] = "Purchases", ["Считается по истории сделок в павильоне"] = "Based on your booth trade history",["CHATLOG"] = "CHATLOG"
         };
         var words = english ? translations : translations.ToDictionary(pair => pair.Value, pair => pair.Key);
 
@@ -1044,6 +1072,9 @@ public partial class MainWindow : Window
             foreach (var child in LogicalTreeHelper.GetChildren(node).OfType<DependencyObject>()) Visit(child);
         }
         Visit(this);
+        var serverIndex = Math.Max(0, GroupServerBox.SelectedIndex);
+        FillGroupServerBox();
+        GroupServerBox.SelectedIndex = serverIndex;
         ApplyPhonebookFilter();
         UpdateTradeStats();
     }
@@ -1053,6 +1084,7 @@ public partial class MainWindow : Window
         HistoryView.Visibility = Visibility.Collapsed;
         PhonebookView.Visibility = Visibility.Collapsed;
         SettingsView.Visibility = Visibility.Collapsed;
+        GroupView.Visibility = Visibility.Collapsed;
         DashboardView.Visibility = Visibility.Visible;
         SetActiveNavigation(OverviewNavButton);
     }
@@ -1062,6 +1094,7 @@ public partial class MainWindow : Window
         DashboardView.Visibility = Visibility.Collapsed;
         PhonebookView.Visibility = Visibility.Collapsed;
         SettingsView.Visibility = Visibility.Collapsed;
+        GroupView.Visibility = Visibility.Collapsed;
         HistoryView.Visibility = Visibility.Visible;
         SetActiveNavigation(HistoryNavButton);
         _ = RefreshHistoryAsync();
@@ -1072,9 +1105,194 @@ public partial class MainWindow : Window
         DashboardView.Visibility = Visibility.Collapsed;
         HistoryView.Visibility = Visibility.Collapsed;
         SettingsView.Visibility = Visibility.Collapsed;
+        GroupView.Visibility = Visibility.Collapsed;
         PhonebookView.Visibility = Visibility.Visible;
         SetActiveNavigation(PhonebookNavButton);
         await RefreshPhonebookAsync();
+    }
+
+    private string _groupSource = "tg";
+
+    private async void Group_Click(object sender, RoutedEventArgs e)
+    {
+        DashboardView.Visibility = Visibility.Collapsed;
+        HistoryView.Visibility = Visibility.Collapsed;
+        PhonebookView.Visibility = Visibility.Collapsed;
+        SettingsView.Visibility = Visibility.Collapsed;
+        GroupView.Visibility = Visibility.Visible;
+        SetActiveNavigation(GroupNavButton);
+        // While the tab is open the feed re-reads the server once a minute.
+        _groupTimer ??= new DispatcherTimer(TimeSpan.FromSeconds(60), DispatcherPriority.Background, async (_, _) =>
+        {
+            if (GroupView.Visibility == Visibility.Visible && _groupSource == "tg") await RefreshGroupAsync();
+        }, Dispatcher);
+        await RefreshGroupAsync();
+    }
+
+    // Marketplace-style: a card opens a full-size view with the whole text and the picture; the arrows move between posts.
+    private int _groupViewerIndex = -1;
+
+    private void GroupList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (GroupList.SelectedItem is not GroupPostView post) return;
+        var items = GroupList.ItemsSource as GroupPostView[] ?? [];
+        var index = Array.IndexOf(items, post);
+        GroupList.SelectedItem = null;
+        GroupViewer.Visibility = Visibility.Visible;
+        GroupViewer.Focus();
+        _ = ShowGroupPostAsync(index);
+    }
+
+    private async Task ShowGroupPostAsync(int index)
+    {
+        var items = GroupList.ItemsSource as GroupPostView[] ?? [];
+        if (index < 0 || index >= items.Length) return;
+        _groupViewerIndex = index;
+        var post = items[index];
+        var author = post.Meta.Contains(" · ") ? post.Meta[..post.Meta.IndexOf(" · ", StringComparison.Ordinal)] : "";
+        GroupViewerInitial.Text = author.Length > 0 ? author[..1].ToUpperInvariant() : "•";
+        GroupViewerAuthor.Text = author.Length > 0 ? author : T("Группа", "Group");
+        GroupViewerDate.Text = post.Meta.Contains(" · ") ? post.Meta[(post.Meta.IndexOf(" · ", StringComparison.Ordinal) + 3)..] : post.Meta;
+        GroupViewerText.Text = post.Preview;
+        GroupViewerTags.ItemsSource = post.Tags;
+        GroupViewerLink.Tag = post.Url;
+        // The sender's page when they have a public username; otherwise only the post link is offered.
+        GroupViewerAuthorLink.Tag = post.AuthorUrl;
+        GroupViewerAuthorLink.Visibility = post.AuthorUrl.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        GroupViewerImage.Source = post.Image;
+
+        if (post.Image is null) return;
+        var full = await LoadGroupPhotoAsync(post.Id, $"id={Uri.EscapeDataString(_settings.UserId)}&machineId={Uri.EscapeDataString(_settings.MachineId)}", full: true);
+        if (full is not null && _groupViewerIndex == index && GroupViewer.Visibility == Visibility.Visible) GroupViewerImage.Source = full;
+    }
+
+    private void GroupViewerClose_Click(object sender, RoutedEventArgs e) { GroupViewer.Visibility = Visibility.Collapsed; GroupViewerImage.Source = null; _groupViewerIndex = -1; }
+    private void GroupViewerPrev_Click(object sender, RoutedEventArgs e) => _ = ShowGroupPostAsync(_groupViewerIndex - 1);
+    private void GroupViewerNext_Click(object sender, RoutedEventArgs e) => _ = ShowGroupPostAsync(_groupViewerIndex + 1);
+
+    private void GroupViewer_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key == System.Windows.Input.Key.Escape) GroupViewerClose_Click(sender, e);
+        else if (e.Key == System.Windows.Input.Key.Left) GroupViewerPrev_Click(sender, e);
+        else if (e.Key == System.Windows.Input.Key.Right) GroupViewerNext_Click(sender, e);
+    }
+    private DispatcherTimer? _groupTimer;
+    private GroupPostView[] _groupViews = [];
+
+    private void GroupSearch_Changed(object sender, TextChangedEventArgs e) => ApplyGroupFilter();
+    private void GroupServer_Changed(object sender, SelectionChangedEventArgs e) => ApplyGroupFilter();
+
+    private sealed record GroupServerOption(int Id, string Label, System.Windows.Media.Brush Color);
+
+    // "All servers" plus the 13 game servers, each with a dot in the server's colour.
+    private void FillGroupServerBox()
+    {
+        var options = new List<GroupServerOption> { new(0, T("Все серверы", "All servers"), new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xAA, 0xB0, 0xBA))) };
+        for (var server = 1; server <= 13; server++)
+        {
+            var key = server.ToString(CultureInfo.InvariantCulture);
+            options.Add(new GroupServerOption(server, GetGameServerLabel(key).Replace("[", "").Replace("]", ""), new System.Windows.Media.SolidColorBrush(GetGameServerColor(key))));
+        }
+        GroupServerBox.ItemsSource = options;
+        GroupServerBox.SelectedIndex = 0;
+    }
+
+    private void ApplyGroupFilter()
+    {
+        if (GroupList is null || GroupSearchBox is null) return;
+        var query = GroupSearchBox.Text.Trim();
+        GroupSearchPlaceholder.Visibility = query.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+        var visible = query.Length == 0 ? _groupViews : _groupViews.Where(post => post.Text.Contains(query, StringComparison.CurrentCultureIgnoreCase) || post.Meta.Contains(query, StringComparison.CurrentCultureIgnoreCase) || post.Tags.Any(tag => tag.Label.Contains(query, StringComparison.CurrentCultureIgnoreCase))).ToArray();
+        // The chosen server shows its own posts plus the ALL ones (no server, any server or a transfer).
+        if (GroupServerBox?.SelectedItem is GroupServerOption { Id: > 0 and var server })
+            visible = visible.Where(post => post.Servers.Length == 0 || post.Servers.Contains(server)).ToArray();
+        GroupList.ItemsSource = visible;
+        GroupEmptyText.Text = query.Length > 0 && visible.Length == 0 ? T("Ничего не найдено.", "Nothing found.") : T("Постов пока нет. Новые появятся здесь, как только их опубликуют в группе.", "No posts yet. New ones will appear here as soon as they are published in the group.");
+        GroupEmptyText.Visibility = visible.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private async void RefreshGroup_Click(object sender, RoutedEventArgs e) => await RefreshGroupAsync();
+
+    private void GroupLink_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: string url } && url.StartsWith("https://", StringComparison.Ordinal)) OpenTelegram(url);
+    }
+
+    private async void GroupSource_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: string source }) return;
+        _groupSource = source;
+        foreach (var item in new[] { GroupTelegramButton, GroupVkButton })
+        {
+            var active = ReferenceEquals(item, sender);
+            item.Background = active ? (System.Windows.Media.Brush)FindResource("AccentBrush") : System.Windows.Media.Brushes.Transparent;
+            item.BorderBrush = active ? (System.Windows.Media.Brush)FindResource("AccentBrush") : System.Windows.Media.Brushes.Transparent;
+            item.Foreground = active ? (System.Windows.Media.Brush)FindResource("AccentTextBrush") : (System.Windows.Media.Brush)FindResource("Muted");
+        }
+        await RefreshGroupAsync();
+    }
+
+    private sealed record GroupTag(string Label, System.Windows.Media.Brush Color);
+    private sealed record GroupPostView(long Id, string Meta, string Text, string Url, string AuthorUrl, System.Windows.Media.ImageSource? Image, GroupTag[] Tags, int[] Servers)
+    {
+        // The card preview skips opening lines that only name the server ("06 ROSE", "11 11 11"): the server is already shown as a tag.
+        public string Preview { get; } = StripServerLines(Text);
+    }
+
+    private static string StripServerLines(string text)
+    {
+        var lines = text.Split('\n');
+        var skip = 0;
+        while (skip < lines.Length - 1 && Regex.IsMatch(lines[skip], @"^[\s\p{P}\p{S}]*(?:(?:\d{1,2}|red|yellow|green|azure|silver|rose|black|sky|titan|fire|lime|night|сервер|server|[xх])[\s\p{P}\p{S}]*)*$", RegexOptions.IgnoreCase)) skip++;
+        return string.Join("\n", lines.Skip(skip)).Trim();
+    }
+
+    // A post is tagged with its game server(s); no server (or a character transfer) means ALL.
+    private static GroupTag[] GroupTags(List<int>? servers)
+    {
+        if (servers is null || servers.Count == 0) return [new GroupTag("ALL", new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xAA, 0xB0, 0xBA)))];
+        return servers.Select(server => new GroupTag(GetGameServerLabel(server.ToString(CultureInfo.InvariantCulture)).Replace("[", "").Replace("]", ""), new System.Windows.Media.SolidColorBrush(GetGameServerColor(server.ToString(CultureInfo.InvariantCulture))))).ToArray();
+    }
+
+    private async Task RefreshGroupAsync()
+    {
+        if (_groupSource == "vk")
+        {
+            GroupList.ItemsSource = null;
+            GroupEmptyText.Text = T("Посты из VK пока не подключены: группа закрытая. Откройте её по кнопке «VK ↗» сверху.", "VK posts are not connected yet: the group is closed. Open it with the “VK ↗” button above.");
+            GroupEmptyText.Visibility = Visibility.Visible;
+            return;
+        }
+        GroupEmptyText.Text = T("Постов пока нет. Новые появятся здесь, как только их опубликуют в группе.", "No posts yet. New ones will appear here as soon as they are published in the group.");
+        try
+        {
+            var query = $"id={Uri.EscapeDataString(_settings.UserId)}&machineId={Uri.EscapeDataString(_settings.MachineId)}";
+            var result = await Api.GetFromJsonAsync<GroupResponse>($"group/posts?{query}");
+            if (result?.Items is null || _groupSource != "tg") return;
+            var views = await Task.WhenAll(result.Items.Select(async post =>
+            {
+                System.Windows.Media.ImageSource? image = null;
+                if (post.HasPhoto == 1) image = await LoadGroupPhotoAsync(post.Id, query);
+                var when = DateTimeOffset.FromUnixTimeMilliseconds(post.CreatedAt).ToLocalTime().ToString("dd.MM.yyyy HH:mm");
+                return new GroupPostView(post.Id, string.IsNullOrWhiteSpace(post.Author) ? when : $"{post.Author} · {when}", post.Text, $"https://t.me/sit_crmp/{post.Id}", post.AuthorUsername.Length > 0 ? $"https://t.me/{post.AuthorUsername}" : "", image, GroupTags(post.Servers), post.Servers?.ToArray() ?? []);
+            }));
+            _groupViews = views;
+            ApplyGroupFilter();
+        }
+        catch (Exception ex) { Log.Write($"Could not load group posts: {ex.Message}"); }
+    }
+
+    private static async Task<System.Windows.Media.ImageSource?> LoadGroupPhotoAsync(long postId, string query, bool full = false)
+    {
+        try
+        {
+            using var response = await Api.GetAsync($"group/photo?{query}&post={postId}");
+            if (!response.IsSuccessStatusCode) return null;
+            await using var stream = await response.Content.ReadAsStreamAsync();
+            var image = new BitmapImage(); image.BeginInit(); image.CacheOption = BitmapCacheOption.OnLoad; if (!full) image.DecodePixelWidth = 480; image.StreamSource = stream; image.EndInit(); image.Freeze();
+            return image;
+        }
+        catch (Exception ex) { Log.Write($"Could not load a group photo: {ex.Message}"); return null; }
     }
 
     private void Settings_Click(object sender, RoutedEventArgs e)
@@ -1082,13 +1300,14 @@ public partial class MainWindow : Window
         DashboardView.Visibility = Visibility.Collapsed;
         HistoryView.Visibility = Visibility.Collapsed;
         PhonebookView.Visibility = Visibility.Collapsed;
+        GroupView.Visibility = Visibility.Collapsed;
         SettingsView.Visibility = Visibility.Visible;
         SetActiveNavigation(SettingsNavButton);
     }
 
     private void SetActiveNavigation(System.Windows.Controls.Button active)
     {
-        foreach (var button in new[] { OverviewNavButton, HistoryNavButton, PhonebookNavButton, SettingsNavButton })
+        foreach (var button in new[] { OverviewNavButton, HistoryNavButton, PhonebookNavButton, GroupNavButton, SettingsNavButton })
         {
             var selected = ReferenceEquals(button, active);
             button.Background = selected ? (System.Windows.Media.Brush)FindResource("AccentBrush") : System.Windows.Media.Brushes.Transparent;
@@ -1206,6 +1425,7 @@ public partial class MainWindow : Window
         public bool Bath { get; set; } = true;
         public bool Need { get; set; } = true;
         public string BoothDropTime { get; set; } = "06:05";
+        public Dictionary<string, long> HistoryClearedAt { get; set; } = [];
         public bool ShowNotificationsTab { get; set; } = true;
         public bool DarkTheme { get; set; } = true;
         public string Language { get; set; } = "ru";
@@ -1262,6 +1482,8 @@ public partial class MainWindow : Window
         public System.Windows.Media.Brush ServerBrush => Frozen(GetGameServerColor(Server));
         public System.Windows.Media.Brush ServerChipBrush { get { var c = GetGameServerColor(Server); return Frozen(System.Windows.Media.Color.FromArgb(0x2E, c.R, c.G, c.B)); } }
     }
+    private sealed class GroupResponse { public List<GroupPostRecord>? Items { get; set; } }
+    private sealed class GroupPostRecord { public long Id { get; set; } public long CreatedAt { get; set; } public string Text { get; set; } = ""; public string Author { get; set; } = ""; public string AuthorUsername { get; set; } = ""; public List<int>? Servers { get; set; } public int HasPhoto { get; set; } }
     private sealed class HistoryResponse { public List<HistoryRecord>? Items { get; set; } }
     private sealed class PhonebookResponse { public List<PhonebookRecord>? Items { get; set; } }
     private sealed class PhonebookRecord

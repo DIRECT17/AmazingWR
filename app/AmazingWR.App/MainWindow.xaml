@@ -57,8 +57,12 @@
             <GradientStop Color="#0008080A" Offset="0.45"/>
             <GradientStop Color="#F008080A" Offset="1"/>
         </LinearGradientBrush>
+        <DataTemplate x:Key="GroupTagTemplate"><Border Background="#B8000000" BorderBrush="{Binding Color}" BorderThickness="1" CornerRadius="7" Padding="7,2" Margin="0,0,5,0"><TextBlock Text="{Binding Label}" Foreground="{Binding Color}" FontSize="11" FontWeight="SemiBold"/></Border></DataTemplate>
+        <BitmapImage x:Key="ArtNoPhoto" UriSource="pack://application:,,,/AmazingWR;component/art/no-photo.jpg" DecodePixelWidth="480"/>
+        <BitmapImage x:Key="ArtNoPhotoFull" UriSource="pack://application:,,,/AmazingWR;component/art/no-photo.jpg"/>
         <BitmapImage x:Key="ArtBackground" UriSource="pack://application:,,,/AmazingWR;component/art/bg-red.jpg"/>
         <BitmapImage x:Key="ArtBoss" UriSource="pack://application:,,,/AmazingWR;component/art/hero-boss.png"/>
+        <Geometry x:Key="VkIconGeometry">M15.684 0H8.316C1.592 0 0 1.592 0 8.316v7.368C0 22.408 1.592 24 8.316 24h7.368C22.408 24 24 22.408 24 15.684V8.316C24 1.592 22.408 0 15.684 0zm3.692 17.123h-1.744c-.66 0-.864-.525-2.05-1.727-1.033-1-1.49-1.135-1.744-1.135-.356 0-.458.102-.458.593v1.575c0 .424-.135.678-1.253.678-1.846 0-3.896-1.118-5.335-3.202C4.624 10.857 4.03 8.57 4.03 8.096c0-.254.102-.491.593-.491h1.744c.44 0 .61.203.78.677.863 2.49 2.303 4.675 2.896 4.675.22 0 .322-.102.322-.66V9.721c-.068-1.186-.695-1.287-.695-1.71 0-.204.17-.407.44-.407h2.744c.373 0 .508.203.508.643v3.473c0 .372.17.508.271.508.22 0 .407-.136.813-.542 1.254-1.406 2.151-3.574 2.151-3.574.119-.254.322-.491.763-.491h1.744c.525 0 .644.27.525.643-.22 1.017-2.354 4.031-2.354 4.031-.186.305-.254.44 0 .78.186.254.796.779 1.195 1.253.745.847 1.32 1.558 1.473 2.05.17.49-.085.744-.576.744z</Geometry>
         <Geometry x:Key="BrandCatGeometry">M15 0h1v1h-1zM23 0h1v1h-1zM14 1h3v1h-3zM22 1h3v1h-3zM13 2h2v1h-2zM16 2h1v1h-1zM21 2h2v1h-2zM24 2h1v1h-1zM12 3h2v1h-2zM16 3h2v1h-2zM20 3h2v1h-2zM24 3h1v1h-1zM11 4h2v1h-2zM15 4h8v1h-8zM24 4h1v1h-1zM9 5h16v1h-16zM8 6h17v1h-17zM7 7h18v1h-18zM7 8h18v1h-18zM7 9h19v1h-19zM1 10h5v1h-5zM7 10h19v1h-19zM0 11h14v1h-14zM17 11h4v1h-4zM24 11h2v1h-2zM0 12h26v1h-26zM0 13h3v1h-3zM6 13h20v1h-20zM9 14h16v1h-16zM11 15h13v1h-13z</Geometry>
         <BitmapImage x:Key="ArtBusinessman" UriSource="pack://application:,,,/AmazingWR;component/art/businessman.png"/>
         <Style TargetType="TextBlock">
@@ -187,7 +191,7 @@
         <Style x:Key="InputComboBox" TargetType="ComboBox">
             <Setter Property="Background" Value="{DynamicResource CardBgBrush}"/><Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}"/><Setter Property="BorderBrush" Value="{DynamicResource InputBorderBrush}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="Padding" Value="9,7"/><Setter Property="SnapsToDevicePixels" Value="True"/>
             <Setter Property="ItemContainerStyle"><Setter.Value><Style TargetType="ComboBoxItem"><Setter Property="Background" Value="{DynamicResource CardBgBrush}"/><Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}"/><Setter Property="Padding" Value="8,6"/><Style.Triggers><Trigger Property="IsHighlighted" Value="True"><Setter Property="Background" Value="{DynamicResource ButtonBgBrush}"/></Trigger></Style.Triggers></Style></Setter.Value></Setter>
-            <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ComboBox"><Grid><Border x:Name="ComboBorder" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="10"/><Grid Margin="3"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="28"/></Grid.ColumnDefinitions><ContentPresenter x:Name="SelectionBox" Margin="{TemplateBinding Padding}" Content="{TemplateBinding SelectionBoxItem}" ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}" ContentStringFormat="{TemplateBinding SelectionBoxItemStringFormat}" VerticalAlignment="Center" HorizontalAlignment="Left" TextElement.Foreground="{TemplateBinding Foreground}" IsHitTestVisible="False"/><ToggleButton Grid.Column="1" Focusable="False" IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}" ClickMode="Press" Background="Transparent" BorderThickness="0"><Path Data="M 0,0 L 4,4 L 8,0" Stroke="{DynamicResource Muted}" StrokeThickness="1.5" HorizontalAlignment="Center" VerticalAlignment="Center"/></ToggleButton></Grid><Popup x:Name="PART_Popup" AllowsTransparency="True" Focusable="False" IsOpen="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}}" Placement="Bottom" PopupAnimation="Fade"><Border Background="{DynamicResource CardBgBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" CornerRadius="10" Padding="4" Margin="0,4,0,0"><ScrollViewer MaxHeight="240" SnapsToDevicePixels="True"><ItemsPresenter KeyboardNavigation.DirectionalNavigation="Contained"/></ScrollViewer></Border></Popup></Grid><ControlTemplate.Triggers><Trigger Property="IsKeyboardFocusWithin" Value="True"><Setter TargetName="ComboBorder" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/></Trigger><Trigger Property="IsEnabled" Value="False"><Setter TargetName="ComboBorder" Property="Opacity" Value="0.5"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
+            <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ComboBox"><Grid><Border x:Name="ComboBorder" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="10"/><Grid Margin="3"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="28"/></Grid.ColumnDefinitions><ContentPresenter x:Name="SelectionBox" Margin="{TemplateBinding Padding}" Content="{TemplateBinding SelectionBoxItem}" ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}" ContentStringFormat="{TemplateBinding SelectionBoxItemStringFormat}" VerticalAlignment="Center" HorizontalAlignment="Left" TextElement.Foreground="{TemplateBinding Foreground}" IsHitTestVisible="False"/><ToggleButton Grid.ColumnSpan="2" Focusable="False" IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}" ClickMode="Press" Background="Transparent" BorderThickness="0"><ToggleButton.Template><ControlTemplate TargetType="ToggleButton"><Border Background="Transparent"/></ControlTemplate></ToggleButton.Template></ToggleButton><Path Grid.Column="1" Data="M 0,0 L 4,4 L 8,0" Stroke="{DynamicResource Muted}" StrokeThickness="1.5" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"/></Grid><Popup x:Name="PART_Popup" AllowsTransparency="True" Focusable="False" IsOpen="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}}" Placement="Bottom" PopupAnimation="Fade"><Border Background="{DynamicResource CardBgBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" CornerRadius="10" Padding="4" Margin="0,4,0,0"><ScrollViewer MaxHeight="240" SnapsToDevicePixels="True"><ItemsPresenter KeyboardNavigation.DirectionalNavigation="Contained"/></ScrollViewer></Border></Popup></Grid><ControlTemplate.Triggers><Trigger Property="IsKeyboardFocusWithin" Value="True"><Setter TargetName="ComboBorder" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/></Trigger><Trigger Property="IsEnabled" Value="False"><Setter TargetName="ComboBorder" Property="Opacity" Value="0.5"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
         </Style>
     </Window.Resources>
     <Grid>
@@ -243,6 +247,7 @@
                         <Button x:Name="OverviewNavButton" Content="Обзор" Style="{StaticResource RoundButton}" HorizontalContentAlignment="Left" Background="{DynamicResource AccentBrush}" BorderBrush="{DynamicResource AccentBrush}" Foreground="{DynamicResource AccentTextBrush}" Padding="15,12" Click="Overview_Click"/>
                         <Button x:Name="HistoryNavButton" Content="История" Style="{StaticResource RoundButton}" HorizontalContentAlignment="Left" Background="Transparent" BorderBrush="Transparent" Foreground="{DynamicResource Muted}" Padding="15,12" Margin="0,8,0,0" Click="History_Click"/>
                         <Button x:Name="PhonebookNavButton" Content="Телефонная книга" Style="{StaticResource RoundButton}" HorizontalContentAlignment="Left" Background="Transparent" BorderBrush="Transparent" Foreground="{DynamicResource Muted}" Padding="15,12" Margin="0,8,0,0" Click="Phonebook_Click"/>
+                        <Button x:Name="GroupNavButton" Content="Свободная группа" Style="{StaticResource RoundButton}" HorizontalContentAlignment="Left" Background="Transparent" BorderBrush="Transparent" Foreground="{DynamicResource Muted}" Padding="15,12" Margin="0,8,0,0" Click="Group_Click"/>
                         <Button x:Name="SettingsNavButton" Content="Настройки" Style="{StaticResource RoundButton}" HorizontalContentAlignment="Left" Background="Transparent" BorderBrush="Transparent" Foreground="{DynamicResource Muted}" Padding="15,12" Margin="0,8,0,0" Click="Settings_Click"/>
                     </StackPanel>
                     <StackPanel DockPanel.Dock="Bottom">
@@ -325,7 +330,7 @@
                 </Grid>
                 <Grid x:Name="HistoryView" Visibility="Collapsed">
                     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-                    <Grid Grid.Row="0" Margin="0,0,0,22"><StackPanel><TextBlock Text="История" FontSize="27" FontWeight="SemiBold"/><TextBlock Text="События сохраняются на сервере и доступны после перезапуска." Foreground="{DynamicResource Muted}" FontSize="13" Margin="0,5,0,0"/></StackPanel><Button Content="↻ Обновить" Style="{StaticResource RoundButton}" HorizontalAlignment="Right" VerticalAlignment="Center" Padding="14,8" Click="RefreshHistory_Click"/></Grid>
+                    <Grid Grid.Row="0" Margin="0,0,0,22"><StackPanel><TextBlock Text="История" FontSize="27" FontWeight="SemiBold"/><TextBlock Text="События сохраняются на сервере и доступны после перезапуска." Foreground="{DynamicResource Muted}" FontSize="13" Margin="0,5,0,0"/></StackPanel><StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center"><Button x:Name="HistoryClearButton" Content="🗑 Очистить" Style="{StaticResource RoundButton}" Padding="14,8" Margin="0,0,8,0" Click="ClearHistory_Click"/><Button Content="↻ Обновить" Style="{StaticResource RoundButton}" Padding="14,8" Click="RefreshHistory_Click"/></StackPanel></Grid>
                     <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,16">
                         <Button x:Name="HistoryAllButton" Content="Все" Tag="Все" Style="{StaticResource RoundButton}" Background="{DynamicResource AccentBrush}" BorderBrush="{DynamicResource AccentBrush}" Foreground="{DynamicResource AccentTextBrush}" Padding="15,8" Margin="0,0,8,0" Click="HistoryFilter_Click"/>
                         <Button x:Name="HistoryNeedsButton" Content="Нужды" Tag="Нужды" Style="{StaticResource RoundButton}" Background="Transparent" BorderBrush="Transparent" Foreground="{DynamicResource Muted}" Padding="15,8" Margin="0,0,8,0" Click="HistoryFilter_Click"/>
@@ -386,6 +391,57 @@
                         </ListBox>
                     </Border>
                 </Grid>
+                <Grid x:Name="GroupView" Visibility="Collapsed">
+                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                    <Grid Grid.Row="0" Margin="0,0,0,22"><StackPanel><TextBlock Text="Свободная группа" FontSize="27" FontWeight="SemiBold"/><TextBlock Text="Новые посты из группы без перехода в мессенджер." Foreground="{DynamicResource Muted}" FontSize="13" Margin="0,5,0,0"/></StackPanel><Button Content="↻ Обновить" Style="{StaticResource RoundButton}" HorizontalAlignment="Right" VerticalAlignment="Center" Padding="14,8" Click="RefreshGroup_Click"/></Grid>
+                    <Grid Grid.Row="1" Margin="0,0,0,16">
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
+                            <Button x:Name="GroupTelegramButton" Content="Telegram" Tag="tg" Style="{StaticResource RoundButton}" Background="{DynamicResource AccentBrush}" BorderBrush="{DynamicResource AccentBrush}" Foreground="{DynamicResource AccentTextBrush}" Padding="15,8" Margin="0,0,8,0" Click="GroupSource_Click"/>
+                            <Button x:Name="GroupVkButton" Content="VK" Tag="vk" Style="{StaticResource RoundButton}" Background="Transparent" BorderBrush="Transparent" Foreground="{DynamicResource Muted}" Padding="15,8" Click="GroupSource_Click"/>
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                            <TextBlock Text="Свободные группы" Foreground="{DynamicResource Muted}" FontSize="12" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                            <Button Tag="https://t.me/sit_crmp" Style="{StaticResource RoundButton}" Padding="14,8" Margin="0,0,8,0" ToolTip="Свободная группа в Telegram · t.me/sit_crmp" Click="GroupLink_Click"><StackPanel Orientation="Horizontal"><Path Data="{StaticResource TelegramIconGeometry}" Fill="#29A9EB" Width="16" Height="16" Stretch="Uniform"/><TextBlock Text="Telegram" Margin="9,0,0,0" VerticalAlignment="Center"/></StackPanel></Button>
+                            <Button Tag="https://vk.ru/sit_crmp" Style="{StaticResource RoundButton}" Padding="14,8" ToolTip="Свободная группа во ВКонтакте · vk.ru/sit_crmp" Click="GroupLink_Click"><StackPanel Orientation="Horizontal"><Path Data="{StaticResource VkIconGeometry}" Fill="#0077FF" Width="16" Height="16" Stretch="Uniform"/><TextBlock Text="VK" Margin="9,0,0,0" VerticalAlignment="Center"/></StackPanel></Button>
+                        </StackPanel>
+                    </Grid>
+                    <Border Grid.Row="2" Background="{DynamicResource CardBgBrush}" CornerRadius="14" Padding="18" BorderBrush="{DynamicResource BorderThemeBrush}" BorderThickness="1">
+                        <Grid>
+                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                            <Grid Margin="0,0,0,12"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><Border Background="{DynamicResource Surface2Brush}" CornerRadius="10" Padding="14,0" Height="42">
+                                <Grid>
+                                    <TextBox x:Name="GroupSearchBox" Background="Transparent" BorderThickness="0" Foreground="{DynamicResource PrimaryTextBrush}" CaretBrush="{DynamicResource AccentBrush}" FontSize="14.5" VerticalContentAlignment="Center" ToolTip="Поиск по тексту и автору" TextChanged="GroupSearch_Changed"/>
+                                    <TextBlock x:Name="GroupSearchPlaceholder" Text="⌕  Поиск по тексту и автору" Foreground="{DynamicResource Muted}" FontSize="14" VerticalAlignment="Center" IsHitTestVisible="False"/>
+                                </Grid>
+                            </Border>
+                            <ComboBox x:Name="GroupServerBox" Grid.Column="1" Style="{StaticResource InputComboBox}" Width="180" Height="42" Margin="10,0,0,0" VerticalContentAlignment="Center" ToolTip="Показать посты выбранного сервера и ALL" SelectionChanged="GroupServer_Changed"><ComboBox.ItemTemplate><DataTemplate><StackPanel Orientation="Horizontal"><Ellipse Width="10" Height="10" Fill="{Binding Color}" VerticalAlignment="Center"/><TextBlock Text="{Binding Label}" Margin="9,0,0,0" VerticalAlignment="Center"/></StackPanel></DataTemplate></ComboBox.ItemTemplate></ComboBox>
+                        </Grid>
+                            <ListBox x:Name="GroupList" Grid.Row="1" Background="Transparent" BorderThickness="0" Foreground="{DynamicResource PrimaryTextBrush}" ItemContainerStyle="{StaticResource PlainItem}" HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto" ScrollViewer.CanContentScroll="False" SelectionChanged="GroupList_SelectionChanged">
+                                <ListBox.ItemsPanel><ItemsPanelTemplate><WrapPanel HorizontalAlignment="Center" MaxWidth="840"/></ItemsPanelTemplate></ListBox.ItemsPanel>
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Width="200" Background="{DynamicResource RowBgBrush}" BorderBrush="{DynamicResource BorderThemeBrush}" BorderThickness="1" CornerRadius="12" Margin="5,0,5,10" Cursor="Hand" ClipToBounds="True">
+                                            <StackPanel>
+                                                <Border Height="113" Background="{DynamicResource Surface2Brush}" CornerRadius="11,11,0,0" ClipToBounds="True">
+                                                    <Grid>
+                                                        <Image Source="{StaticResource ArtNoPhoto}" Stretch="UniformToFill"/>
+                                                        <Image Source="{Binding Image}" Stretch="UniformToFill"/>
+                                                        <ItemsControl ItemsSource="{Binding Tags}" ItemTemplate="{StaticResource GroupTagTemplate}" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="8,8,0,0"><ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate></ItemsControl.ItemsPanel></ItemsControl>
+                                                    </Grid>
+                                                </Border>
+                                                <StackPanel Margin="12,10,12,12">
+                                                    <TextBlock Text="{Binding Preview}" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxHeight="58" FontSize="13" LineHeight="19" LineStackingStrategy="BlockLineHeight"/>
+                                                    <TextBlock Text="{Binding Meta}" Foreground="{DynamicResource Muted}" FontSize="11.5" TextTrimming="CharacterEllipsis" Margin="0,9,0,0"/>
+                                                </StackPanel>
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                            <TextBlock x:Name="GroupEmptyText" Grid.Row="1" Text="Постов пока нет. Новые появятся здесь, как только их опубликуют в группе." Foreground="{DynamicResource Muted}" FontSize="14" TextWrapping="Wrap" HorizontalAlignment="Center" VerticalAlignment="Center" TextAlignment="Center" Visibility="Collapsed"/>
+                        </Grid>
+                    </Border>
+                                </Grid>
                 <Grid x:Name="SettingsView" Visibility="Collapsed">
                     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
                     <StackPanel Grid.Row="0" Margin="0,0,0,20"><TextBlock Text="Настройки" FontSize="27" FontWeight="SemiBold"/><TextBlock Text="Разделы и параметры AmzWR" Foreground="{DynamicResource Muted}" FontSize="13" Margin="0,5,0,0"/></StackPanel>
@@ -441,7 +497,36 @@
                     </TabControl>
                 </Grid>
             </Grid>
-        </Grid>
+                <Grid x:Name="GroupViewer" Grid.ColumnSpan="2" Visibility="Collapsed" Focusable="True" KeyDown="GroupViewer_KeyDown">
+                <Border Background="#F2050507" MouseLeftButtonDown="GroupViewerClose_Click"/>
+                <Border Background="{DynamicResource CardBgBrush}" BorderBrush="{DynamicResource BorderThemeBrush}" BorderThickness="1" CornerRadius="18" MaxWidth="940" Margin="56,36" VerticalAlignment="Center" MaxHeight="740" ClipToBounds="True">
+                    <Border.Effect><DropShadowEffect Color="#000000" BlurRadius="40" ShadowDepth="0" Opacity="0.7"/></Border.Effect>
+                    <Grid>
+                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                        <Border x:Name="GroupViewerImageBox" Background="#0B0B0E" CornerRadius="17,17,0,0" ClipToBounds="True" Height="420">
+                            <Grid><Image Source="{StaticResource ArtNoPhotoFull}" Stretch="Uniform"/><Image x:Name="GroupViewerImage" Stretch="Uniform" StretchDirection="Both" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid>
+                        </Border>
+                        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="28,22,28,24">
+                            <StackPanel>
+                                <StackPanel Orientation="Horizontal">
+                                    <Border Width="38" Height="38" CornerRadius="19" Background="{DynamicResource AccentBrush}"><TextBlock x:Name="GroupViewerInitial" FontSize="16" FontWeight="Bold" Foreground="{DynamicResource AccentTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                    <StackPanel Margin="12,0,0,0" VerticalAlignment="Center"><TextBlock x:Name="GroupViewerAuthor" FontSize="15" FontWeight="SemiBold"/><TextBlock x:Name="GroupViewerDate" Foreground="{DynamicResource Muted}" FontSize="12" Margin="0,2,0,0"/></StackPanel>
+                                    <ItemsControl x:Name="GroupViewerTags" ItemTemplate="{StaticResource GroupTagTemplate}" Margin="16,0,0,0" VerticalAlignment="Center"><ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate></ItemsControl.ItemsPanel></ItemsControl>
+                                </StackPanel>
+                                <TextBlock x:Name="GroupViewerText" TextWrapping="Wrap" FontSize="16" LineHeight="25" Margin="0,18,0,0"/>
+                                <StackPanel Orientation="Horizontal" Margin="0,22,0,0">
+                                    <Button x:Name="GroupViewerAuthorLink" Content="Написать автору ↗" Style="{StaticResource RoundButton}" Background="{DynamicResource AccentBrush}" BorderBrush="{DynamicResource AccentBrush}" Foreground="{DynamicResource AccentTextBrush}" Padding="18,10" Margin="0,0,10,0" Click="GroupLink_Click"/>
+                                    <Button x:Name="GroupViewerLink" Content="Открыть пост в Telegram ↗" Style="{StaticResource RoundButton}" Padding="18,10" Click="GroupLink_Click"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </ScrollViewer>
+                        <Button Content="✕" Style="{StaticResource RoundButton}" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,14,14,0" Padding="12,6" Background="#99000000" Click="GroupViewerClose_Click"/>
+                        <Button Content="‹" Style="{StaticResource RoundButton}" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="14,180,0,0" Padding="14,6" FontSize="22" Background="#99000000" ToolTip="Предыдущий (←)" Click="GroupViewerPrev_Click"/>
+                        <Button Content="›" Style="{StaticResource RoundButton}" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,180,14,0" Padding="14,6" FontSize="22" Background="#99000000" ToolTip="Следующий (→)" Click="GroupViewerNext_Click"/>
+                    </Grid>
+                </Border>
+            </Grid>
+            </Grid>
     </Grid>
 </Window>
 
