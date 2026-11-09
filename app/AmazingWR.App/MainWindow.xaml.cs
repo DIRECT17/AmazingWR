@@ -298,11 +298,11 @@ public partial class MainWindow : Window
         ProfileGameServer.Text = gameServer is null ? T("Сервер не выбран", "Game server not selected") : GetGameServerLabel(gameServer);
         ProfileGameServer.Foreground = new System.Windows.Media.SolidColorBrush(GetGameServerColor(gameServer ?? ""));
         SettingsLogPath.Text = _settings.LogPath;
-        BridgeStatus.Text = T("Проверяем соединение…", "Checking connection…");
-        BridgeDot.Fill = (System.Windows.Media.Brush)FindResource("NegativeBrush");
+        UpdateStatusTiles();
         _lastProfileRefresh = DateTime.UtcNow;
         UpdateSubscription();
         _ = RefreshAppVersionAsync();
+        _ = RefreshDiscordStatusAsync();
         ResetTailToEnd();
         _timer.Start();
         _ = LoadAvatarAsync(profile.Id);
@@ -412,13 +412,13 @@ public partial class MainWindow : Window
     private async void UpdateApp_Click(object sender, RoutedEventArgs e)
     {
         if (_updating || !Uri.TryCreate(_latestDownloadUrl, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps) return;
-        _updating = true;
-        UpdateButton.IsEnabled = false;
+        _updating = true; // the button stays enabled so it keeps its full look while loading; a second click is ignored by the check above
         try
         {
-            var progress = new Progress<double>(share => UpdateButton.Content = T($"Загрузка {share:P0}", $"Downloading {share:P0}"));
+            BeginUpdateAnimation();
+            var progress = new Progress<double>(share => ShowUpdateProgress(share));
             var newExe = await Updater.DownloadAsync(uri.AbsoluteUri, _latestSha256, progress);
-            UpdateButton.Content = T("Устанавливаю…", "Installing…");
+            ShowUpdateProgress(1, installing: true);
             Updater.StartApply(newExe);
             ExitFromTray();
         }
@@ -426,12 +426,63 @@ public partial class MainWindow : Window
         {
             // Not writable folder, antivirus, no network…: fall back to a normal browser download.
             Log.Write("Automatic update failed; opening the download page instead", ex);
-            UpdateButton.Content = T("✨ Обновить AmzWR", "✨ Update AmzWR");
+            EndUpdateAnimation();
             UpdateButton.IsEnabled = true;
             _updating = false;
             try { Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true }); }
             catch (Exception openError) { Log.Write("Could not open app update download", openError); }
         }
+    }
+
+    // A spinning arc in the button, the percentage in its text, and a bar under it that fills smoothly with a light sweep running across it.
+    private void BeginUpdateAnimation()
+    {
+        StartLoadingCat();
+        UpdateProgressHost.Visibility = Visibility.Visible;
+        UpdateProgressFill.Width = 0;
+        UpdateShimmerMove.BeginAnimation(System.Windows.Media.TranslateTransform.XProperty, new System.Windows.Media.Animation.DoubleAnimation(-40, 240, TimeSpan.FromSeconds(1.3)) { RepeatBehavior = System.Windows.Media.Animation.RepeatBehavior.Forever });
+        UpdateButtonText.Text = T("Загрузка 0%", "Downloading 0%");
+    }
+
+    // The loading cat: 15 frames (cut out of the supplied GIF, background removed) laid out in one sheet, 5 columns by 3 rows, played at the GIF's own 0.1 s per frame.
+    private const int CatFrameWidth = 104, CatFrameHeight = 68, CatColumns = 5, CatFrames = 15;
+    private DispatcherTimer? _catTimer;
+    private System.Windows.Media.ImageBrush? _catBrush;
+    private int _catFrame;
+
+    private void StartLoadingCat()
+    {
+        if (_catBrush is null)
+        {
+            var sheet = new BitmapImage(new Uri("pack://application:,,,/art/loading-cat-sheet.png"));
+            _catBrush = new System.Windows.Media.ImageBrush(sheet) { ViewboxUnits = System.Windows.Media.BrushMappingMode.Absolute, Stretch = System.Windows.Media.Stretch.Fill };
+            UpdateCat.Fill = _catBrush;
+            _catTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(100), DispatcherPriority.Background, (_, _) => { _catFrame = (_catFrame + 1) % CatFrames; ShowCatFrame(); }, Dispatcher);
+        }
+        _catFrame = 0; ShowCatFrame();
+        UpdateCatX.X = -4;
+        _catTimer!.Start();
+    }
+
+    private void ShowCatFrame() => _catBrush!.Viewbox = new Rect(_catFrame % CatColumns * CatFrameWidth, _catFrame / CatColumns * CatFrameHeight, CatFrameWidth, CatFrameHeight);
+
+    private void ShowUpdateProgress(double share, bool installing = false)
+    {
+        UpdateButtonText.Text = installing ? T("Устанавливаю…", "Installing…") : T($"Загрузка {share:P0}", $"Downloading {share:P0}");
+        var width = Math.Max(UpdateProgressHost.ActualWidth, 1) * Math.Clamp(share, 0, 1);
+        UpdateProgressFill.BeginAnimation(FrameworkElement.WidthProperty, new System.Windows.Media.Animation.DoubleAnimation(width, TimeSpan.FromMilliseconds(220)));
+        // the cat sits on the end of the bar and rides along with it (kept inside the bar's ends)
+        UpdateCatX.BeginAnimation(System.Windows.Media.TranslateTransform.XProperty, new System.Windows.Media.Animation.DoubleAnimation(Math.Clamp(width - 26, -4, Math.Max(UpdateProgressHost.ActualWidth - 48, -4)), TimeSpan.FromMilliseconds(220)));
+    }
+
+    private void EndUpdateAnimation()
+    {
+        _catTimer?.Stop();
+        UpdateCatX.BeginAnimation(System.Windows.Media.TranslateTransform.XProperty, null);
+        UpdateShimmerMove.BeginAnimation(System.Windows.Media.TranslateTransform.XProperty, null);
+        UpdateProgressFill.BeginAnimation(FrameworkElement.WidthProperty, null);
+        UpdateProgressHost.Visibility = Visibility.Collapsed;
+        UpdateButtonText.Text = T("✨ Обновить AmzWR", "✨ Update AmzWR");
     }
 
     private void Timer_Tick(object? sender, EventArgs e)
@@ -454,6 +505,7 @@ public partial class MainWindow : Window
         {
             _lastProfileRefresh = DateTime.UtcNow;
             _ = RefreshProfileAsync();
+            _ = RefreshDiscordStatusAsync();
         }
         if (DateTime.UtcNow - _lastBridgeRefresh > TimeSpan.FromSeconds(10))
         {
@@ -468,22 +520,41 @@ public partial class MainWindow : Window
         {
             using var response = await Api.GetAsync("health");
             var health = await response.Content.ReadFromJsonAsync<BridgeHealth>();
-            var connected = health?.Ok == true && health.TelegramOk;
-            SetBridgeStatus(connected);
+            _serverOk = health?.Ok == true;
+            _telegramOk = health?.TelegramOk == true;
+            UpdateStatusTiles();
         }
         catch (Exception ex)
         {
             Log.Write("Server health check failed", ex);
-            SetBridgeStatus(false);
+            _serverOk = false; _telegramOk = false;
+            UpdateStatusTiles();
         }
     }
 
-    private void SetBridgeStatus(bool connected)
+    private bool _serverOk, _telegramOk, _discordLinked, _discordOn = true, _telegramOn = true;
+    private enum TileState { Ok, Bad, Off }
+
+    // The three tiles under the language switch: the server, Telegram (the bot's connection, or "off" if the player switched it off) and Discord (this account's link).
+    private void UpdateStatusTiles()
     {
-        BridgeStatus.Text = connected ? T("Онлайн", "Online") : T("Нет соединения", "Offline");
-        BridgeDot.Fill = (System.Windows.Media.Brush)FindResource(connected ? "PositiveBrush" : "NegativeBrush");
-        if (BridgeDot.Effect is System.Windows.Media.Effects.DropShadowEffect glow)
-            glow.Color = (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(connected ? "#35D07F" : "#FF5C63");
+        SetTile(BridgeDot, BridgeStatus, _serverOk ? T("Онлайн", "Online") : T("Нет связи", "Offline"), _serverOk ? TileState.Ok : TileState.Bad);
+        if (!_serverOk) SetTile(TelegramDot, TelegramStatus, "—", TileState.Off);
+        else if (!_telegramOn) SetTile(TelegramDot, TelegramStatus, T("Выкл.", "Off"), TileState.Off);
+        else SetTile(TelegramDot, TelegramStatus, _telegramOk ? T("Онлайн", "Online") : T("Сбой", "Fault"), _telegramOk ? TileState.Ok : TileState.Bad);
+        if (!_discordLinked) SetTile(DiscordDot, DiscordTileStatus, T("Не привязан", "Not linked"), TileState.Off);
+        else SetTile(DiscordDot, DiscordTileStatus, _discordOn ? T("Онлайн", "Online") : T("Выкл.", "Off"), _discordOn ? TileState.Ok : TileState.Off);
+    }
+
+    private void SetTile(System.Windows.Shapes.Ellipse dot, TextBlock label, string text, TileState state)
+    {
+        label.Text = text;
+        dot.Fill = (System.Windows.Media.Brush)FindResource(state switch { TileState.Ok => "PositiveBrush", TileState.Bad => "NegativeBrush", _ => "Muted" });
+        if (dot.Effect is System.Windows.Media.Effects.DropShadowEffect glow)
+        {
+            glow.Color = (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(state == TileState.Ok ? "#35D07F" : "#FF5C63");
+            glow.Opacity = state == TileState.Off ? 0 : 0.65;
+        }
     }
 
     private async Task RefreshProfileAsync()
@@ -1111,8 +1182,6 @@ public partial class MainWindow : Window
         await RefreshPhonebookAsync();
     }
 
-    private string _groupSource = "tg";
-
     private async void Group_Click(object sender, RoutedEventArgs e)
     {
         DashboardView.Visibility = Visibility.Collapsed;
@@ -1124,7 +1193,7 @@ public partial class MainWindow : Window
         // While the tab is open the feed re-reads the server once a minute.
         _groupTimer ??= new DispatcherTimer(TimeSpan.FromSeconds(60), DispatcherPriority.Background, async (_, _) =>
         {
-            if (GroupView.Visibility == Visibility.Visible && _groupSource == "tg") await RefreshGroupAsync();
+            if (GroupView.Visibility == Visibility.Visible) await RefreshGroupAsync();
         }, Dispatcher);
         await RefreshGroupAsync();
     }
@@ -1218,20 +1287,6 @@ public partial class MainWindow : Window
         if (sender is Button { Tag: string url } && url.StartsWith("https://", StringComparison.Ordinal)) OpenTelegram(url);
     }
 
-    private async void GroupSource_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is not Button { Tag: string source }) return;
-        _groupSource = source;
-        foreach (var item in new[] { GroupTelegramButton, GroupVkButton })
-        {
-            var active = ReferenceEquals(item, sender);
-            item.Background = active ? (System.Windows.Media.Brush)FindResource("AccentBrush") : System.Windows.Media.Brushes.Transparent;
-            item.BorderBrush = active ? (System.Windows.Media.Brush)FindResource("AccentBrush") : System.Windows.Media.Brushes.Transparent;
-            item.Foreground = active ? (System.Windows.Media.Brush)FindResource("AccentTextBrush") : (System.Windows.Media.Brush)FindResource("Muted");
-        }
-        await RefreshGroupAsync();
-    }
-
     private sealed record GroupTag(string Label, System.Windows.Media.Brush Color);
     private sealed record GroupPostView(long Id, string Meta, string Text, string Url, string AuthorUrl, System.Windows.Media.ImageSource? Image, GroupTag[] Tags, int[] Servers)
     {
@@ -1256,19 +1311,12 @@ public partial class MainWindow : Window
 
     private async Task RefreshGroupAsync()
     {
-        if (_groupSource == "vk")
-        {
-            GroupList.ItemsSource = null;
-            GroupEmptyText.Text = T("Посты из VK пока не подключены: группа закрытая. Откройте её по кнопке «VK ↗» сверху.", "VK posts are not connected yet: the group is closed. Open it with the “VK ↗” button above.");
-            GroupEmptyText.Visibility = Visibility.Visible;
-            return;
-        }
         GroupEmptyText.Text = T("Постов пока нет. Новые появятся здесь, как только их опубликуют в группе.", "No posts yet. New ones will appear here as soon as they are published in the group.");
         try
         {
             var query = $"id={Uri.EscapeDataString(_settings.UserId)}&machineId={Uri.EscapeDataString(_settings.MachineId)}";
             var result = await Api.GetFromJsonAsync<GroupResponse>($"group/posts?{query}");
-            if (result?.Items is null || _groupSource != "tg") return;
+            if (result?.Items is null) return;
             var views = await Task.WhenAll(result.Items.Select(async post =>
             {
                 System.Windows.Media.ImageSource? image = null;
