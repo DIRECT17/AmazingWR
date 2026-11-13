@@ -104,6 +104,7 @@ public partial class MainWindow
     private static void ApplyAppTheme(Window dialog, System.Windows.Controls.Panel panel)
     {
         if (dialog.Owner is null) return;
+        dialog.Resources.MergedDictionaries.Add(dialog.Owner.Resources); // the styles use DynamicResource brushes that live in the main window
         dialog.Background = (System.Windows.Media.Brush)dialog.Owner.FindResource("WindowBgBrush");
         dialog.Foreground = (System.Windows.Media.Brush)dialog.Owner.FindResource("PrimaryTextBrush");
         foreach (var button in panel.Children.OfType<Button>()) button.Style = (Style)dialog.Owner.FindResource("RoundButton");

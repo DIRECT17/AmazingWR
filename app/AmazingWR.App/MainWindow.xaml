@@ -276,6 +276,7 @@
                                 </StackPanel>
                             </Border>
                         </Grid>
+                        <Button Style="{StaticResource SideButton}" Margin="0,0,0,8" Click="Feedback_Click"><StackPanel Orientation="Horizontal"><TextBlock Text="💡" FontSize="15" Width="18" TextAlignment="Center" VerticalAlignment="Center"/><TextBlock Text="Идеи и ошибки" FontSize="14" Margin="11,0,0,0" VerticalAlignment="Center"/></StackPanel></Button>
                         <Button Style="{StaticResource SideButton}" Margin="0,0,0,8" Click="Support_Click"><StackPanel Orientation="Horizontal"><Path Data="{StaticResource TelegramIconGeometry}" Fill="#29A9EB" Width="18" Height="18" Stretch="Uniform"/><TextBlock Text="Поддержка" Margin="11,0,0,0" VerticalAlignment="Center"/></StackPanel></Button>
                         <Button Style="{StaticResource SideButton}" Click="Logout_Click"><StackPanel Orientation="Horizontal"><Path Data="{StaticResource ExitIconGeometry}" Fill="{DynamicResource AccentBrush}" Width="18" Height="18" Stretch="Uniform"/><TextBlock Text="Выйти из аккаунта" Margin="11,0,0,0" VerticalAlignment="Center"/></StackPanel></Button>
                         <StackPanel Margin="13,7,0,0"><TextBlock x:Name="VersionLabel" Text="Версия · проверка…" Foreground="{DynamicResource Muted}" FontSize="10"/>

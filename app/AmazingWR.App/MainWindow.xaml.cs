@@ -1120,7 +1120,7 @@ public partial class MainWindow : Window
             ["ПАРОЛЬ"] = "PASSWORD", ["Задать или забыли пароль?"] = "Set or forgot your password?",
             ["Сохранить пароль"] = "Save password", ["Входить автоматически"] = "Sign in automatically",
             ["Войти"] = "Log in",
-            ["Получить доступ в Telegram"] = "Get access in Telegram", ["Поддержка"] = "Support",
+            ["Получить доступ в Telegram"] = "Get access in Telegram", ["Поддержка"] = "Support", ["Идеи и ошибки"] = "Ideas and bugs",
             ["Обзор"] = "Overview", ["История"] = "History", ["Телефонная книга"] = "Phonebook", ["Поиск по имени или номеру"] = "Search by name or number", ["Общая база входящих номеров игроков · сортировка по последнему контакту"] = "Shared player contact list · sorted by last contact", ["ТЕЛЕФОН"] = "PHONE", ["ПОСЛЕДНЕЕ ИЗМЕНЕНИЕ"] = "LAST UPDATED", ["ИЗМЕНЁН"] = "UPDATED", ["Настройки"] = "Settings", ["Выйти из аккаунта"] = "Log out",
             ["Уведомления"] = "Notifications", ["Настройки программы"] = "App settings",
             ["Разделы и параметры AmzWR"] = "AmzWR sections and preferences",
@@ -1288,10 +1288,15 @@ public partial class MainWindow : Window
     }
 
     private sealed record GroupTag(string Label, System.Windows.Media.Brush Color);
-    private sealed record GroupPostView(long Id, string Meta, string Text, string Url, string AuthorUrl, System.Windows.Media.ImageSource? Image, GroupTag[] Tags, int[] Servers)
+    private sealed record GroupPostView(long Id, string Meta, string Text, string Url, string AuthorUrl, GroupTag[] Tags, int[] Servers) : System.ComponentModel.INotifyPropertyChanged
     {
         // The card preview skips opening lines that only name the server ("06 ROSE", "11 11 11"): the server is already shown as a tag.
         public string Preview { get; } = StripServerLines(Text);
+
+        // The picture arrives after the card is already on screen, so the card listens for it.
+        private System.Windows.Media.ImageSource? _image;
+        public System.Windows.Media.ImageSource? Image { get => _image; set { _image = value; PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(nameof(Image))); } }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
     }
 
     private static string StripServerLines(string text)
@@ -1309,25 +1314,44 @@ public partial class MainWindow : Window
         return servers.Select(server => new GroupTag(GetGameServerLabel(server.ToString(CultureInfo.InvariantCulture)).Replace("[", "").Replace("]", ""), new System.Windows.Media.SolidColorBrush(GetGameServerColor(server.ToString(CultureInfo.InvariantCulture))))).ToArray();
     }
 
+    // Pictures already downloaded stay in memory, so the once-a-minute refresh and re-opening the tab do not fetch them again.
+    private readonly Dictionary<long, System.Windows.Media.ImageSource> _groupPhotos = [];
+    private bool _groupRefreshing;
+
     private async Task RefreshGroupAsync()
     {
+        if (_groupRefreshing) return;
+        _groupRefreshing = true;
         GroupEmptyText.Text = T("Постов пока нет. Новые появятся здесь, как только их опубликуют в группе.", "No posts yet. New ones will appear here as soon as they are published in the group.");
         try
         {
             var query = $"id={Uri.EscapeDataString(_settings.UserId)}&machineId={Uri.EscapeDataString(_settings.MachineId)}";
             var result = await Api.GetFromJsonAsync<GroupResponse>($"group/posts?{query}");
             if (result?.Items is null) return;
-            var views = await Task.WhenAll(result.Items.Select(async post =>
+            var views = result.Items.Select(post =>
             {
-                System.Windows.Media.ImageSource? image = null;
-                if (post.HasPhoto == 1) image = await LoadGroupPhotoAsync(post.Id, query);
                 var when = DateTimeOffset.FromUnixTimeMilliseconds(post.CreatedAt).ToLocalTime().ToString("dd.MM.yyyy HH:mm");
-                return new GroupPostView(post.Id, string.IsNullOrWhiteSpace(post.Author) ? when : $"{post.Author} · {when}", post.Text, $"https://t.me/sit_crmp/{post.Id}", post.AuthorUsername.Length > 0 ? $"https://t.me/{post.AuthorUsername}" : "", image, GroupTags(post.Servers), post.Servers?.ToArray() ?? []);
-            }));
+                return new GroupPostView(post.Id, string.IsNullOrWhiteSpace(post.Author) ? when : $"{post.Author} · {when}", post.Text, $"https://t.me/sit_crmp/{post.Id}", post.AuthorUsername.Length > 0 ? $"https://t.me/{post.AuthorUsername}" : "", GroupTags(post.Servers), post.Servers?.ToArray() ?? []) { Image = _groupPhotos.GetValueOrDefault(post.Id) };
+            }).ToArray();
+            // The cards appear at once with the text; pictures are filled in as they arrive, a few at a time.
             _groupViews = views;
             ApplyGroupFilter();
+            using var gate = new SemaphoreSlim(4);
+            await Task.WhenAll(result.Items.Zip(views).Where(pair => pair.First.HasPhoto == 1 && pair.Second.Image is null).Select(async pair =>
+            {
+                await gate.WaitAsync();
+                try
+                {
+                    var image = await LoadGroupPhotoAsync(pair.First.Id, query);
+                    if (image is null) return;
+                    _groupPhotos[pair.First.Id] = image;
+                    pair.Second.Image = image;
+                }
+                finally { gate.Release(); }
+            }));
         }
         catch (Exception ex) { Log.Write($"Could not load group posts: {ex.Message}"); }
+        finally { _groupRefreshing = false; }
     }
 
     private static async Task<System.Windows.Media.ImageSource?> LoadGroupPhotoAsync(long postId, string query, bool full = false)
