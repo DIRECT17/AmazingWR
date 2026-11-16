@@ -57,9 +57,14 @@ public partial class MainWindow : Window
         SetWindowMode(authenticated: false);
         Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
         _settings = LoadSettings();
+        _theme = Themes.FirstOrDefault(theme => theme.Id == _settings.Theme) ?? Themes[0];
+        ApplyTheme(_theme);
+        SourceInitialized += (_, _) => ApplyCaptionColors();
+        PreviewKeyDown += (_, e) => { if (e.Key == System.Windows.Input.Key.Escape && UpdateOverlay.Visibility == Visibility.Visible && UpdateAskPanel.Visibility == Visibility.Visible) HideUpdateOverlay(); };
         if (string.IsNullOrWhiteSpace(_settings.MachineId)) _settings.MachineId = Guid.NewGuid().ToString("D");
         SaveSettings();
         FillGroupServerBox();
+        FillThemeList();
         _loading = true;
         TelegramIdBox.Text = _settings.UserId;
         ApplyToken(Secrets.Unprotect(_settings.Token));
@@ -81,7 +86,8 @@ public partial class MainWindow : Window
         BathToggle.IsChecked = _settings.Bath;
         HouseRobberyToggle.IsChecked = _settings.HouseRobbery;
         NeedToggle.IsChecked = _settings.Need;
-        LanguageBox.SelectedIndex = _settings.Language == "en" ? 1 : 0;
+        LangRuButton.IsChecked = _settings.Language != "en";
+        LangEnButton.IsChecked = _settings.Language == "en";
         BoothDropTimeBox.Text = _settings.BoothDropTime;
         MonitoringToggle.IsChecked = _settings.Monitoring;
         ShowNotificationsTabToggle.IsChecked = _settings.ShowNotificationsTab;
@@ -385,6 +391,7 @@ public partial class MainWindow : Window
         var local = localVersion is null ? "1.0.0" : $"{localVersion.Major}.{localVersion.Minor}.{Math.Max(0, localVersion.Build)}";
         VersionLabel.Text = T($"Версия v{local} · проверяем…", $"Version v{local} · checking…");
         UpdateButton.Visibility = Visibility.Collapsed;
+        _updateAvailable = false;
         try
         {
             var response = await Api.GetFromJsonAsync<VersionResponse>("version");
@@ -399,91 +406,17 @@ public partial class MainWindow : Window
             VersionLabel.Text = isCurrent
                 ? T($"Версия v{local} · актуальная", $"Version v{local} · up to date")
                 : T($"Версия v{local} · доступна v{latest}", $"Version v{local} · v{latest} available");
-            UpdateButton.Visibility = canCompare && installedVersion < serverVersion && Uri.TryCreate(_latestDownloadUrl, UriKind.Absolute, out var downloadUri) && downloadUri.Scheme == Uri.UriSchemeHttps
-                ? Visibility.Visible
-                : Visibility.Collapsed;
+            _updateAvailable = canCompare && installedVersion < serverVersion && Uri.TryCreate(_latestDownloadUrl, UriKind.Absolute, out var downloadUri) && downloadUri.Scheme == Uri.UriSchemeHttps;
+            _latestVersionText = latest;
+            UpdateButton.Visibility = _updateAvailable ? Visibility.Visible : Visibility.Collapsed;
+            UpdateButtonText.Text = T($"Обновить до v{latest}", $"Update to v{latest}");
+            if (_updateAvailable && AppView.Visibility == Visibility.Visible) ShowUpdateOverlay(); // offered once after every sign-in
         }
         catch (Exception ex)
         {
             Log.Write("Could not check for a new version", ex);
             VersionLabel.Text = T($"Версия v{local} · сервер недоступен", $"Version v{local} · server unavailable");
         }
-    }
-
-    private async void UpdateApp_Click(object sender, RoutedEventArgs e)
-    {
-        if (_updating || !Uri.TryCreate(_latestDownloadUrl, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps) return;
-        _updating = true; // the button stays enabled so it keeps its full look while loading; a second click is ignored by the check above
-        try
-        {
-            BeginUpdateAnimation();
-            var progress = new Progress<double>(share => ShowUpdateProgress(share));
-            var newExe = await Updater.DownloadAsync(uri.AbsoluteUri, _latestSha256, progress);
-            ShowUpdateProgress(1, installing: true);
-            Updater.StartApply(newExe);
-            ExitFromTray();
-        }
-        catch (Exception ex)
-        {
-            // Not writable folder, antivirus, no network…: fall back to a normal browser download.
-            Log.Write("Automatic update failed; opening the download page instead", ex);
-            EndUpdateAnimation();
-            UpdateButton.IsEnabled = true;
-            _updating = false;
-            try { Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true }); }
-            catch (Exception openError) { Log.Write("Could not open app update download", openError); }
-        }
-    }
-
-    // A spinning arc in the button, the percentage in its text, and a bar under it that fills smoothly with a light sweep running across it.
-    private void BeginUpdateAnimation()
-    {
-        StartLoadingCat();
-        UpdateProgressHost.Visibility = Visibility.Visible;
-        UpdateProgressFill.Width = 0;
-        UpdateShimmerMove.BeginAnimation(System.Windows.Media.TranslateTransform.XProperty, new System.Windows.Media.Animation.DoubleAnimation(-40, 240, TimeSpan.FromSeconds(1.3)) { RepeatBehavior = System.Windows.Media.Animation.RepeatBehavior.Forever });
-        UpdateButtonText.Text = T("Загрузка 0%", "Downloading 0%");
-    }
-
-    // The loading cat: 15 frames (cut out of the supplied GIF, background removed) laid out in one sheet, 5 columns by 3 rows, played at the GIF's own 0.1 s per frame.
-    private const int CatFrameWidth = 104, CatFrameHeight = 68, CatColumns = 5, CatFrames = 15;
-    private DispatcherTimer? _catTimer;
-    private System.Windows.Media.ImageBrush? _catBrush;
-    private int _catFrame;
-
-    private void StartLoadingCat()
-    {
-        if (_catBrush is null)
-        {
-            var sheet = new BitmapImage(new Uri("pack://application:,,,/art/loading-cat-sheet.png"));
-            _catBrush = new System.Windows.Media.ImageBrush(sheet) { ViewboxUnits = System.Windows.Media.BrushMappingMode.Absolute, Stretch = System.Windows.Media.Stretch.Fill };
-            UpdateCat.Fill = _catBrush;
-            _catTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(100), DispatcherPriority.Background, (_, _) => { _catFrame = (_catFrame + 1) % CatFrames; ShowCatFrame(); }, Dispatcher);
-        }
-        _catFrame = 0; ShowCatFrame();
-        UpdateCatX.X = -4;
-        _catTimer!.Start();
-    }
-
-    private void ShowCatFrame() => _catBrush!.Viewbox = new Rect(_catFrame % CatColumns * CatFrameWidth, _catFrame / CatColumns * CatFrameHeight, CatFrameWidth, CatFrameHeight);
-
-    private void ShowUpdateProgress(double share, bool installing = false)
-    {
-        UpdateButtonText.Text = installing ? T("Устанавливаю…", "Installing…") : T($"Загрузка {share:P0}", $"Downloading {share:P0}");
-        var width = Math.Max(UpdateProgressHost.ActualWidth, 1) * Math.Clamp(share, 0, 1);
-        UpdateProgressFill.BeginAnimation(FrameworkElement.WidthProperty, new System.Windows.Media.Animation.DoubleAnimation(width, TimeSpan.FromMilliseconds(220)));
-        // the cat sits on the end of the bar and rides along with it (kept inside the bar's ends)
-        UpdateCatX.BeginAnimation(System.Windows.Media.TranslateTransform.XProperty, new System.Windows.Media.Animation.DoubleAnimation(Math.Clamp(width - 26, -4, Math.Max(UpdateProgressHost.ActualWidth - 48, -4)), TimeSpan.FromMilliseconds(220)));
-    }
-
-    private void EndUpdateAnimation()
-    {
-        _catTimer?.Stop();
-        UpdateCatX.BeginAnimation(System.Windows.Media.TranslateTransform.XProperty, null);
-        UpdateShimmerMove.BeginAnimation(System.Windows.Media.TranslateTransform.XProperty, null);
-        UpdateProgressFill.BeginAnimation(FrameworkElement.WidthProperty, null);
-        UpdateProgressHost.Visibility = Visibility.Collapsed;
-        UpdateButtonText.Text = T("✨ Обновить AmzWR", "✨ Update AmzWR");
     }
 
     private void Timer_Tick(object? sender, EventArgs e)
@@ -909,9 +842,7 @@ public partial class MainWindow : Window
         var active = category == "Все" ? HistoryAllButton : category == "Нужды" ? HistoryNeedsButton : category == "Павильон" ? HistoryBoothButton : HistoryPhoneButton;
         foreach (var item in new[] { HistoryAllButton, HistoryNeedsButton, HistoryBoothButton, HistoryPhoneButton })
         {
-            item.Background = ReferenceEquals(item, active) ? (System.Windows.Media.Brush)FindResource("AccentBrush") : System.Windows.Media.Brushes.Transparent;
-            item.BorderBrush = ReferenceEquals(item, active) ? (System.Windows.Media.Brush)FindResource("AccentBrush") : System.Windows.Media.Brushes.Transparent;
-            item.Foreground = ReferenceEquals(item, active) ? (System.Windows.Media.Brush)FindResource("AccentTextBrush") : (System.Windows.Media.Brush)FindResource("Muted");
+            Highlight(item, ReferenceEquals(item, active));
         }
         ApplyHistoryFilter();
     }
@@ -952,9 +883,7 @@ public partial class MainWindow : Window
         foreach (var item in new[] { StatsDayButton, StatsWeekButton, StatsMonthButton })
         {
             var active = ReferenceEquals(item, button);
-            item.Background = active ? (System.Windows.Media.Brush)FindResource("AccentBrush") : System.Windows.Media.Brushes.Transparent;
-            item.BorderBrush = active ? (System.Windows.Media.Brush)FindResource("AccentBrush") : System.Windows.Media.Brushes.Transparent;
-            item.Foreground = active ? (System.Windows.Media.Brush)FindResource("AccentTextBrush") : (System.Windows.Media.Brush)FindResource("Muted");
+            Highlight(item, active);
         }
         UpdateTradeStats();
     }
@@ -1109,7 +1038,7 @@ public partial class MainWindow : Window
     private void Language_Changed(object sender, RoutedEventArgs e)
     {
         if (_loading || !IsLoaded) return;
-        _settings.Language = LanguageBox.SelectedIndex == 1 ? "en" : "ru";
+        _settings.Language = LangEnButton.IsChecked == true ? "en" : "ru";
         ApplyLanguage();
         SaveSettings();
     }
@@ -1127,7 +1056,7 @@ public partial class MainWindow : Window
             ["ПАРОЛЬ"] = "PASSWORD", ["Задать или забыли пароль?"] = "Set or forgot your password?",
             ["Сохранить пароль"] = "Save password", ["Входить автоматически"] = "Sign in automatically",
             ["Войти"] = "Log in",
-            ["Получить доступ в Telegram"] = "Get access in Telegram", ["Поддержка"] = "Support", ["Идеи и ошибки"] = "Ideas and bugs",
+            ["Получить доступ в Telegram"] = "Get access in Telegram", ["Поддержка"] = "Support", ["Оформление"] = "Appearance", ["Доступно обновление"] = "Update available", ["ТЕМА ОФОРМЛЕНИЯ"] = "THEME", ["Цвета серверов Amazing RP: акценты, фон и герой на главном экране."] = "Amazing RP server colours: accents, background and the hero on the main screen.", ["Идеи и ошибки"] = "Ideas and bugs",
             ["Обзор"] = "Overview", ["История"] = "History", ["Телефонная книга"] = "Phonebook", ["Поиск по имени или номеру"] = "Search by name or number", ["Общая база входящих номеров игроков · сортировка по последнему контакту"] = "Shared player contact list · sorted by last contact", ["ТЕЛЕФОН"] = "PHONE", ["ПОСЛЕДНЕЕ ИЗМЕНЕНИЕ"] = "LAST UPDATED", ["ИЗМЕНЁН"] = "UPDATED", ["Настройки"] = "Settings", ["Выйти из аккаунта"] = "Log out",
             ["Уведомления"] = "Notifications", ["Настройки программы"] = "App settings",
             ["Разделы и параметры AmzWR"] = "AmzWR sections and preferences",
@@ -1153,6 +1082,7 @@ public partial class MainWindow : Window
         var serverIndex = Math.Max(0, GroupServerBox.SelectedIndex);
         FillGroupServerBox();
         GroupServerBox.SelectedIndex = serverIndex;
+        FillThemeList();
         ApplyPhonebookFilter();
         UpdateTradeStats();
     }
@@ -1389,9 +1319,7 @@ public partial class MainWindow : Window
         foreach (var button in new[] { OverviewNavButton, HistoryNavButton, PhonebookNavButton, GroupNavButton, SettingsNavButton })
         {
             var selected = ReferenceEquals(button, active);
-            button.Background = selected ? (System.Windows.Media.Brush)FindResource("AccentBrush") : System.Windows.Media.Brushes.Transparent;
-            button.BorderBrush = selected ? (System.Windows.Media.Brush)FindResource("AccentBrush") : System.Windows.Media.Brushes.Transparent;
-            button.Foreground = selected ? (System.Windows.Media.Brush)FindResource("AccentTextBrush") : (System.Windows.Media.Brush)FindResource("Muted");
+            Highlight(button, selected);
         }
     }
 
@@ -1507,6 +1435,7 @@ public partial class MainWindow : Window
         public string BoothDropTime { get; set; } = "06:05";
         public Dictionary<string, long> HistoryClearedAt { get; set; } = [];
         public bool ShowNotificationsTab { get; set; } = true;
+        public string Theme { get; set; } = "red";
         public bool DarkTheme { get; set; } = true;
         public string Language { get; set; } = "ru";
     }
