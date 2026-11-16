@@ -79,6 +79,7 @@ public partial class MainWindow : Window
         HungerToggle.IsChecked = _settings.Hunger;
         ThirstToggle.IsChecked = _settings.Thirst;
         BathToggle.IsChecked = _settings.Bath;
+        HouseRobberyToggle.IsChecked = _settings.HouseRobbery;
         NeedToggle.IsChecked = _settings.Need;
         LanguageBox.SelectedIndex = _settings.Language == "en" ? 1 : 0;
         BoothDropTimeBox.Text = _settings.BoothDropTime;
@@ -711,6 +712,8 @@ public partial class MainWindow : Window
             // line is our sale, while "продал вашему павильону" is our purchase.
             enabled = _monitoring && (boothTrade.Kind == BoothTradeKind.PlayerBought ? _settings.BoothSell : _settings.BoothBuy);
         }
+        else if (lower.Contains("ограблен") && lower.Contains("майнинг"))
+        { category = "Нужды"; summary = "Дом ограблен: майнинг-ферма отключена до ремонта"; enabled = _monitoring && _settings.HouseRobbery; }
         else if (lower.Contains("обезвож") || lower.Contains("жажд") || lower.Contains("хотите пить") || lower.Contains("попить"))
         { category = "Нужды"; summary = "Жажда"; enabled = _monitoring && _settings.Thirst; }
         else if (lower.Contains("истощ") || lower.Contains("голод") || lower.Contains("проголод") || lower.Contains("хотите есть"))
@@ -725,7 +728,7 @@ public partial class MainWindow : Window
         if (_settings.Language == "en")
         {
             category = category switch { "Нужды" => "Needs", "Павильон" => "Booth", "Телефон" => "Phone", "Напоминание" => "Reminder", _ => category };
-            summary = summary switch { "Жажда" => "Thirst", "Голод" => "Hunger", "Баня" => "Bath", "Малая нужда" => "Need", "Слёт" => "Booth expiry", "Покупка в вашем павильоне" => "Booth purchase", "Продажа в вашем павильоне" => "Booth sale", _ => summary.Replace("Входящий:", "Incoming:") };
+            summary = summary switch { "Жажда" => "Thirst", "Голод" => "Hunger", "Баня" => "Bath", "Малая нужда" => "Need", "Дом ограблен: майнинг-ферма отключена до ремонта" => "House robbed: mining farm is off until repaired", "Слёт" => "Booth expiry", "Покупка в вашем павильоне" => "Booth purchase", "Продажа в вашем павильоне" => "Booth sale", _ => summary.Replace("Входящий:", "Incoming:") };
         }
         AddEventAndNotify(match.Groups["time"].Value, category, summary);
     }
@@ -1075,6 +1078,7 @@ public partial class MainWindow : Window
         _settings.Hunger = HungerToggle.IsChecked == true;
         _settings.Thirst = ThirstToggle.IsChecked == true;
         _settings.Bath = BathToggle.IsChecked == true;
+        _settings.HouseRobbery = HouseRobberyToggle.IsChecked == true;
         _settings.Need = NeedToggle.IsChecked == true;
         _settings.BoothDropTime = BoothDropTimeBox.Text.Trim();
         SaveSettings();
@@ -1128,7 +1132,7 @@ public partial class MainWindow : Window
             ["ТЕЛЕФОН"] = "PHONE", ["ПАВИЛЬОНЫ"] = "BOOTH", ["НУЖДЫ"] = "NEEDS",
             ["Уведомления SMS"] = "SMS alerts", ["Уведомления звонков"] = "Call alerts", ["Уведомления о покупке"] = "Purchase alerts", ["Уведомления о продаже"] = "Sale alerts",
             ["Напоминание о слёте павильона"] = "Booth expiry reminder", ["Местное время слёта (чч:мм)"] = "Local booth expiry time (HH:mm)",
-            ["Уведомления о голоде"] = "Hunger alerts", ["Уведомления о жажде"] = "Thirst alerts", ["Уведомления о бане"] = "Bath alerts", ["Уведомления о малой нужде"] = "Need alerts",
+            ["Уведомления о голоде"] = "Hunger alerts", ["Уведомления о жажде"] = "Thirst alerts", ["Уведомления о бане"] = "Bath alerts", ["Уведомления об ограблении дома"] = "House robbery alerts", ["Уведомления о малой нужде"] = "Need alerts",
             ["ВХОД И ФАЙЛ ЛОГА"] = "LOGIN AND LOG FILE", ["Входить автоматически при запуске"] = "Sign in automatically on launch", ["Выбрать файл chatlog.txt"] = "Choose chatlog.txt", ["✨ Обновить AmzWR"] = "✨ Update AmzWR", ["ВИДИМОСТЬ ВКЛАДОК"] = "TAB VISIBILITY", ["Показывать «Уведомления»"] = "Show Notifications", ["Эту вкладку нельзя скрыть, чтобы настройки всегда оставались доступны."] = "This tab stays visible so settings remain accessible.",
             ["Тема: ночь"] = "Theme: night", ["Тема: день"] = "Theme: day", ["ЯЗЫК"] = "LANGUAGE", ["Панель управления"] = "Dashboard", ["Состояние подключения и последние события игры"] = "Connection status and recent game events", ["МОНИТОРИНГ"] = "MONITORING", ["Все функции включены"] = "All features enabled", ["Все функции выключены"] = "All features disabled", ["ПОДПИСКА"] = "SUBSCRIPTION", ["ОСТАЛОСЬ"] = "REMAINING", ["Выбрать лог"] = "Choose log", ["СОСТОЯНИЕ СЕРВЕРА"] = "SERVER STATUS", ["Есть соединение с сервером"] = "Server connected", ["Нет соединения с сервером"] = "No server connection", ["Amazing.exe запущена"] = "Amazing.exe is running", ["Amazing.exe не запущена"] = "Amazing.exe is not running",
             ["Нужды"] = "Needs", ["Павильон"] = "Booth", ["Телефон"] = "Phone", ["История уведомлений"] = "Notification history", ["Нужды, события павильона и телефонные уведомления сохраняются в вашей истории на сервере."] = "Needs, booth events and phone alerts are saved to your history on the server.", ["Открыть историю →"] = "Open history →", ["События сохраняются на сервере и доступны после перезапуска."] = "Events are stored on the server and remain available after restart.", ["↻ Обновить"] = "↻ Refresh", ["Свободная группа"] = "Free group", ["Свободные группы"] = "Free groups", ["Все серверы"] = "All servers", ["Написать автору ↗"] = "Message the author ↗", ["Открыть пост в Telegram ↗"] = "Open the post in Telegram ↗", ["Поиск по тексту и автору"] = "Search by text or author", ["Новые посты из группы без перехода в мессенджер."] = "New posts from the group without leaving the app.", ["Открыть в Telegram ↗"] = "Open in Telegram ↗", ["Постов пока нет. Новые появятся здесь, как только их опубликуют в группе."] = "No posts yet. New ones will appear here as soon as they are published in the group.", ["🗑 Очистить"] = "🗑 Clear", ["Все"] = "All", ["СЕРВЕР"] = "SERVER", ["Онлайн"] = "Online", ["Нет соединения"] = "Offline", ["AMZWR  ·  ТИХИЙ ПОМОЩНИК"] = "AMZWR  ·  QUIET GAME ASSISTANT", ["Следит за чатом.\nОстаётся вне игры."] = "Watches the chat.\nStays outside the game.", ["AMAZINGWR  ·  ПАВИЛЬОН"] = "AMAZINGWR  ·  BOOTH", ["Статистика торговли"] = "Trading stats", ["Сегодня"] = "Today", ["Неделя"] = "Week", ["Месяц"] = "Month", ["Продажи"] = "Sales", ["Закупки"] = "Purchases", ["Считается по истории сделок в павильоне"] = "Based on your booth trade history",["CHATLOG"] = "CHATLOG"
@@ -1495,6 +1499,7 @@ public partial class MainWindow : Window
         public bool Hunger { get; set; } = true;
         public bool Thirst { get; set; } = true;
         public bool Bath { get; set; } = true;
+        public bool HouseRobbery { get; set; } = true;
         public bool Need { get; set; } = true;
         public string BoothDropTime { get; set; } = "06:05";
         public Dictionary<string, long> HistoryClearedAt { get; set; } = [];
