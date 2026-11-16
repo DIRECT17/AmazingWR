@@ -839,9 +839,12 @@ public partial class MainWindow : Window
     {
         var current = _phonebookItems.FirstOrDefault(item => item.Phone == phone && item.Server == server);
         if (current is not null) _phonebookItems.Remove(current);
-        _phonebookItems.Insert(0, new PhonebookEntry(name, phone, server, DateTimeOffset.FromUnixTimeMilliseconds(updatedAt).ToLocalTime().ToString("dd.MM.yyyy HH:mm:ss")));
+        // Contacts are mixed in a random order and only say "recently" / "long ago", so nobody can tell which one is the newest.
+        _phonebookItems.Insert(Random.Shared.Next(_phonebookItems.Count + 1), new PhonebookEntry(name, phone, server, PhonebookAge(updatedAt)));
         if (refreshList) ApplyPhonebookFilter();
     }
+
+    private string PhonebookAge(long updatedAt) => DateTimeOffset.UtcNow - DateTimeOffset.FromUnixTimeMilliseconds(updatedAt) > TimeSpan.FromDays(60) ? T("давно", "long ago") : T("недавно", "recently");
 
     private async Task RefreshPhonebookAsync()
     {
@@ -852,8 +855,8 @@ public partial class MainWindow : Window
             var result = await Api.GetFromJsonAsync<PhonebookResponse>(route);
             if (result?.Items is null) return;
             _phonebookItems.Clear();
-            // Oldest first: every entry is inserted at the front, so the newest ends up on top. One list refresh at the end, not one per contact.
-            foreach (var item in result.Items.OrderBy(item => item.UpdatedAt))
+            // Every entry lands at a random place, so the order says nothing about age. One list refresh at the end, not one per contact.
+            foreach (var item in result.Items)
                 UpsertPhonebookEntry(item.Name, item.Phone, item.Server, item.UpdatedAt, refreshList: false);
             ApplyPhonebookFilter();
         }
