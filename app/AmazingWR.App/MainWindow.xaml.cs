@@ -476,7 +476,7 @@ public partial class MainWindow : Window
         if (!_serverOk) SetTile(TelegramDot, TelegramStatus, "—", TileState.Off);
         else if (!_telegramOn) SetTile(TelegramDot, TelegramStatus, T("Выкл.", "Off"), TileState.Off);
         else SetTile(TelegramDot, TelegramStatus, _telegramOk ? T("Онлайн", "Online") : T("Сбой", "Fault"), _telegramOk ? TileState.Ok : TileState.Bad);
-        if (!_discordLinked) SetTile(DiscordDot, DiscordTileStatus, T("Не привязан", "Not linked"), TileState.Off);
+        if (!_discordLinked) SetTile(DiscordDot, DiscordTileStatus, T("Нет", "No"), TileState.Off);
         else SetTile(DiscordDot, DiscordTileStatus, _discordOn ? T("Онлайн", "Online") : T("Выкл.", "Off"), _discordOn ? TileState.Ok : TileState.Off);
     }
 
@@ -646,7 +646,7 @@ public partial class MainWindow : Window
             enabled = _monitoring && (boothTrade.Kind == BoothTradeKind.PlayerBought ? _settings.BoothSell : _settings.BoothBuy);
         }
         else if (lower.Contains("ограблен") && lower.Contains("майнинг"))
-        { category = "Нужды"; summary = "Дом ограблен: майнинг-ферма отключена до ремонта"; enabled = _monitoring && _settings.HouseRobbery; }
+        { category = "Майнинг"; summary = "Дом ограблен: майнинг-ферма отключена до ремонта"; enabled = _monitoring && _settings.HouseRobbery; }
         else if (lower.Contains("обезвож") || lower.Contains("жажд") || lower.Contains("хотите пить") || lower.Contains("попить"))
         { category = "Нужды"; summary = "Жажда"; enabled = _monitoring && _settings.Thirst; }
         else if (lower.Contains("истощ") || lower.Contains("голод") || lower.Contains("проголод") || lower.Contains("хотите есть"))
@@ -660,7 +660,7 @@ public partial class MainWindow : Window
         if (!enabled) return;
         if (_settings.Language == "en")
         {
-            category = category switch { "Нужды" => "Needs", "Павильон" => "Booth", "Телефон" => "Phone", "Напоминание" => "Reminder", _ => category };
+            category = category switch { "Нужды" => "Needs", "Павильон" => "Booth", "Телефон" => "Phone", "Майнинг" => "Mining", "Напоминание" => "Reminder", _ => category };
             summary = summary switch { "Жажда" => "Thirst", "Голод" => "Hunger", "Баня" => "Bath", "Малая нужда" => "Need", "Дом ограблен: майнинг-ферма отключена до ремонта" => "House robbed: mining farm is off until repaired", "Слёт" => "Booth expiry", "Покупка в вашем павильоне" => "Booth purchase", "Продажа в вашем павильоне" => "Booth sale", _ => summary.Replace("Входящий:", "Incoming:") };
         }
         AddEventAndNotify(match.Groups["time"].Value, category, summary);
@@ -695,12 +695,17 @@ public partial class MainWindow : Window
         "Нужды" or "Needs" => "Нужды",
         "Павильон" or "Booth" => "Павильон",
         "Телефон" or "Phone" or "SMS" or "Звонок" or "Call" => "Телефон",
+        "Майнинг" or "Mining" => "Майнинг",
         _ => null
     };
 
     private string LocalizedHistoryCategory(string category) => _settings.Language == "en"
-        ? category switch { "Нужды" => "Needs", "Павильон" => "Booth", "Телефон" => "Phone", _ => category }
+        ? category switch { "Нужды" => "Needs", "Павильон" => "Booth", "Телефон" => "Phone", "Майнинг" => "Mining", _ => category }
         : category;
+
+    // Version 1.1.4–1.1.6 saved the house robbery under "Нужды"; those entries belong to the mining tab too.
+    private static string? HistoryCategoryOf(string category, string text) =>
+        text.StartsWith("Дом ограблен", StringComparison.Ordinal) || text.StartsWith("House robbed", StringComparison.Ordinal) ? "Майнинг" : CanonicalHistoryCategory(category);
 
     private async Task SaveHistoryAsync(string gameTime, string category, string text)
     {
@@ -730,7 +735,7 @@ public partial class MainWindow : Window
             foreach (var item in result.Items)
             {
                 var time = DateTimeOffset.FromUnixTimeMilliseconds(item.CreatedAt).ToLocalTime().ToString("dd.MM.yyyy HH:mm:ss");
-                var category = CanonicalHistoryCategory(item.Category);
+                var category = HistoryCategoryOf(item.Category, item.Text);
                 if (category is null || (_settings.HistoryClearedAt.TryGetValue(category, out var clearedAt) && item.CreatedAt <= clearedAt)) continue;
                 _historyItems.Add(new HistoryEntry(time, LocalizedHistoryCategory(category), item.Text));
             }
@@ -839,8 +844,8 @@ public partial class MainWindow : Window
     {
         if (sender is not Button button || button.Tag is not string category) return;
         _historyFilter = category;
-        var active = category == "Все" ? HistoryAllButton : category == "Нужды" ? HistoryNeedsButton : category == "Павильон" ? HistoryBoothButton : HistoryPhoneButton;
-        foreach (var item in new[] { HistoryAllButton, HistoryNeedsButton, HistoryBoothButton, HistoryPhoneButton })
+        var active = category switch { "Нужды" => HistoryNeedsButton, "Павильон" => HistoryBoothButton, "Телефон" => HistoryPhoneButton, "Майнинг" => HistoryMiningButton, _ => HistoryAllButton };
+        foreach (var item in new[] { HistoryAllButton, HistoryNeedsButton, HistoryBoothButton, HistoryPhoneButton, HistoryMiningButton })
         {
             Highlight(item, ReferenceEquals(item, active));
         }
@@ -867,7 +872,7 @@ public partial class MainWindow : Window
         HistoryClearButton.Content = T("🗑 Очистить", "🗑 Clear");
         // Local only: the server keeps the history, the client just stops showing entries up to this moment (also after a refresh or restart).
         var now = DateTimeOffset.Now.ToUnixTimeMilliseconds();
-        foreach (var category in _historyFilter == "Все" ? new[] { "Нужды", "Павильон", "Телефон" } : new[] { _historyFilter }) _settings.HistoryClearedAt[category] = now;
+        foreach (var category in _historyFilter == "Все" ? new[] { "Нужды", "Павильон", "Телефон", "Майнинг" } : new[] { _historyFilter }) _settings.HistoryClearedAt[category] = now;
         SaveSettings();
         for (var i = _historyItems.Count - 1; i >= 0; i--)
             if (_historyFilter == "Все" || CanonicalHistoryCategory(_historyItems[i].Category) == _historyFilter) _historyItems.RemoveAt(i);
@@ -1067,7 +1072,7 @@ public partial class MainWindow : Window
             ["Уведомления о голоде"] = "Hunger alerts", ["Уведомления о жажде"] = "Thirst alerts", ["Уведомления о бане"] = "Bath alerts", ["Уведомления об ограблении дома"] = "House robbery alerts", ["Уведомления о малой нужде"] = "Need alerts",
             ["ВХОД И ФАЙЛ ЛОГА"] = "LOGIN AND LOG FILE", ["Входить автоматически при запуске"] = "Sign in automatically on launch", ["Выбрать файл chatlog.txt"] = "Choose chatlog.txt", ["✨ Обновить AmzWR"] = "✨ Update AmzWR", ["ВИДИМОСТЬ ВКЛАДОК"] = "TAB VISIBILITY", ["Показывать «Уведомления»"] = "Show Notifications", ["Эту вкладку нельзя скрыть, чтобы настройки всегда оставались доступны."] = "This tab stays visible so settings remain accessible.",
             ["Тема: ночь"] = "Theme: night", ["Тема: день"] = "Theme: day", ["ЯЗЫК"] = "LANGUAGE", ["Панель управления"] = "Dashboard", ["Состояние подключения и последние события игры"] = "Connection status and recent game events", ["МОНИТОРИНГ"] = "MONITORING", ["Все функции включены"] = "All features enabled", ["Все функции выключены"] = "All features disabled", ["ПОДПИСКА"] = "SUBSCRIPTION", ["ОСТАЛОСЬ"] = "REMAINING", ["Выбрать лог"] = "Choose log", ["СОСТОЯНИЕ СЕРВЕРА"] = "SERVER STATUS", ["Есть соединение с сервером"] = "Server connected", ["Нет соединения с сервером"] = "No server connection", ["Amazing.exe запущена"] = "Amazing.exe is running", ["Amazing.exe не запущена"] = "Amazing.exe is not running",
-            ["Нужды"] = "Needs", ["Павильон"] = "Booth", ["Телефон"] = "Phone", ["История уведомлений"] = "Notification history", ["Нужды, события павильона и телефонные уведомления сохраняются в вашей истории на сервере."] = "Needs, booth events and phone alerts are saved to your history on the server.", ["Открыть историю →"] = "Open history →", ["События сохраняются на сервере и доступны после перезапуска."] = "Events are stored on the server and remain available after restart.", ["↻ Обновить"] = "↻ Refresh", ["Свободная группа"] = "Free group", ["Свободные группы"] = "Free groups", ["Все серверы"] = "All servers", ["Написать автору ↗"] = "Message the author ↗", ["Открыть пост в Telegram ↗"] = "Open the post in Telegram ↗", ["Поиск по тексту и автору"] = "Search by text or author", ["Новые посты из группы без перехода в мессенджер."] = "New posts from the group without leaving the app.", ["Открыть в Telegram ↗"] = "Open in Telegram ↗", ["Постов пока нет. Новые появятся здесь, как только их опубликуют в группе."] = "No posts yet. New ones will appear here as soon as they are published in the group.", ["🗑 Очистить"] = "🗑 Clear", ["Все"] = "All", ["СЕРВЕР"] = "SERVER", ["Онлайн"] = "Online", ["Нет соединения"] = "Offline", ["AMZWR  ·  ТИХИЙ ПОМОЩНИК"] = "AMZWR  ·  QUIET GAME ASSISTANT", ["Следит за чатом.\nОстаётся вне игры."] = "Watches the chat.\nStays outside the game.", ["AMAZINGWR  ·  ПАВИЛЬОН"] = "AMAZINGWR  ·  BOOTH", ["Статистика торговли"] = "Trading stats", ["Сегодня"] = "Today", ["Неделя"] = "Week", ["Месяц"] = "Month", ["Продажи"] = "Sales", ["Закупки"] = "Purchases", ["Считается по истории сделок в павильоне"] = "Based on your booth trade history",["CHATLOG"] = "CHATLOG"
+            ["Нужды"] = "Needs", ["Павильон"] = "Booth", ["Телефон"] = "Phone", ["Майнинг"] = "Mining", ["История уведомлений"] = "Notification history", ["Нужды, события павильона и телефонные уведомления сохраняются в вашей истории на сервере."] = "Needs, booth events and phone alerts are saved to your history on the server.", ["Открыть историю →"] = "Open history →", ["События сохраняются на сервере и доступны после перезапуска."] = "Events are stored on the server and remain available after restart.", ["↻ Обновить"] = "↻ Refresh", ["Свободная группа"] = "Free group", ["Свободные группы"] = "Free groups", ["Все серверы"] = "All servers", ["Написать автору ↗"] = "Message the author ↗", ["Открыть пост в Telegram ↗"] = "Open the post in Telegram ↗", ["Поиск по тексту и автору"] = "Search by text or author", ["Новые посты из группы без перехода в мессенджер."] = "New posts from the group without leaving the app.", ["Открыть в Telegram ↗"] = "Open in Telegram ↗", ["Постов пока нет. Новые появятся здесь, как только их опубликуют в группе."] = "No posts yet. New ones will appear here as soon as they are published in the group.", ["🗑 Очистить"] = "🗑 Clear", ["Все"] = "All", ["СЕРВЕР"] = "SERVER", ["Онлайн"] = "Online", ["Нет соединения"] = "Offline", ["AMZWR  ·  ТИХИЙ ПОМОЩНИК"] = "AMZWR  ·  QUIET GAME ASSISTANT", ["Следит за чатом.\nОстаётся вне игры."] = "Watches the chat.\nStays outside the game.", ["AMAZINGWR  ·  ПАВИЛЬОН"] = "AMAZINGWR  ·  BOOTH", ["Статистика торговли"] = "Trading stats", ["Сегодня"] = "Today", ["Неделя"] = "Week", ["Месяц"] = "Month", ["Продажи"] = "Sales", ["Закупки"] = "Purchases", ["Считается по истории сделок в павильоне"] = "Based on your booth trade history",["CHATLOG"] = "CHATLOG"
         };
         var words = english ? translations : translations.ToDictionary(pair => pair.Value, pair => pair.Key);
 
@@ -1448,11 +1453,12 @@ public partial class MainWindow : Window
     private sealed record HistoryEntry(string Time, string Category, string Text)
     {
         // Category may be localised ("Needs"/"Booth"/"Phone"); colours follow the Russian key.
-        private string Key => Category switch { "Needs" => "Нужды", "Booth" => "Павильон", "Phone" => "Телефон", _ => Category };
+        private string Key => Category switch { "Needs" => "Нужды", "Booth" => "Павильон", "Phone" => "Телефон", "Mining" => "Майнинг", _ => Category };
         private System.Windows.Media.Color AccentColor => Key switch
         {
             "Нужды" => System.Windows.Media.Color.FromRgb(0xFF, 0x2E, 0x2E),
             "Павильон" => System.Windows.Media.Color.FromRgb(0xF2, 0xC4, 0x6D),
+            "Майнинг" => System.Windows.Media.Color.FromRgb(0xFF, 0x8A, 0x3D),
             _ => System.Windows.Media.Color.FromRgb(0x5B, 0xB8, 0xFF)
         };
         public System.Windows.Media.Brush AccentBrush => Frozen(AccentColor);
